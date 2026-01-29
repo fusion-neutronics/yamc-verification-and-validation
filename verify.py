@@ -54,10 +54,8 @@ def sphere_geometry(
     material1.add_nuclide(nuclide, 1.0)
     material1.set_density("g/cm3", 1.0)
 
-    if code == 'openmc':
-        material1.temperature = 294
-    else:
-        material1.temperature = '294'
+    material1.temperature = 294
+
 
     if code == 'yamc':
         print(f"Reading nuclide data for {nuclide}...")
@@ -165,7 +163,8 @@ def sphere_geometry(
     return results_data
 
 NUCLEAR_DATA_DIR = {
-    "endf-b8.0": "/home/jon/nuclear_data/endf-b8.0-hdf5/endfb-viii.0-hdf5/",
+    "endf-b8.0": "/home/jon/nuclear_data/endf-b8.0-hdf5/",
+    # "endf-b8.0": "/home/jon/nuclear_data/endf-b8.0-hdf5/endfb-viii.0-hdf5/",
     "tendl-2021": "/home/jon/nuclear_data/tendl-2021-hdf5/tendl-2021-hdf5/",
 }
 
@@ -175,7 +174,7 @@ all_results = []
 for nuclear_data in ['endf-b8.0']:
     h5_files = sorted(glob.glob(os.path.join(NUCLEAR_DATA_DIR[nuclear_data],'neutron', "*.h5")))
 
-    nuclides = [os.path.splitext(os.path.basename(f))[0] for f in h5_files]
+    nuclides = [os.path.splitext(os.path.basename(f))[0] for f in h5_files[1:3]] # just 1 to 3 to make it quick, i will do all later
 
     # nuclides = ['Cm244', 'Cm246', 'Cf251', 'Cf252', 'Np239', 'Pa233', 'Pu239', 'Pu240']
 
