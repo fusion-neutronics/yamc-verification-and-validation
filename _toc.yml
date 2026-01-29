@@ -1,0 +1,7 @@
+format: jb-book
+root: intro
+chapters:
+  - file: tasks/sphere/endf-b8.0
+    title: Sphere Model - ENDF/B-VIII.0
+  - file: tasks/sphere/fendl-3.2c
+    title: Sphere Model - FENDL-3.2c

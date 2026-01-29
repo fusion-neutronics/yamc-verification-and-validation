@@ -1,3 +1,12 @@
+# Jupyter Book build output
+_build/
+
+# OpenMC/YAMC simulation output
+statepoint.*.h5
+summary.h5
+tallies.out
+tracks.h5
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -205,3 +214,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+*.xml
+*.h5
