@@ -108,13 +108,10 @@ Configured in `_config.yml`:
 ### Notebook execution fails
 
 Check the error in the build output. Common issues:
-- Missing nuclear data files
+- Missing nuclear data files, perhaps correct the data path used
 - OpenMC/YAMC not installed in the virtual environment
 - Timeout exceeded (increase in `_config.yml`)
 
-### Plots not displaying
-
-Ensure `plotly` and `kaleido` are installed. The notebooks use HTML output for Plotly compatibility with static sites.
 
 ### Cache issues
 
