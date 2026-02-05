@@ -1,5 +1,8 @@
-jupyter-book>=1.0.0,<2.0.0
-plotly>=5.0.0
+--extra-index-url https://shimwell.github.io/wheels
+jupyter-book>=2.0.0
+nbconvert
 numpy
 pandas
+plotly>=5.0.0
 kaleido
+openmc

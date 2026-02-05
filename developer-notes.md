@@ -20,17 +20,23 @@ pip install -r requirements.txt
 
 ## Building the Book
 
-To build the book with notebook execution:
+To build the book:
 
 ```bash
 jupyter-book build .
 ```
 
-The HTML output will be in `_build/html/`. Open `_build/html/index.html` in a browser to view.
+The site output will be in `_build/site/`.
+
+To start a local dev server:
+
+```bash
+jupyter-book start
+```
 
 ### Build Options
 
-Force re-execution of all notebooks:
+Force rebuild of all pages:
 
 ```bash
 jupyter-book build . --all
@@ -46,8 +52,7 @@ jupyter-book clean .
 
 ```
 yamc-verification/
-├── _config.yml          # Jupyter Book configuration
-├── _toc.yml             # Table of contents / navigation
+├── myst.yml             # Jupyter Book / MyST configuration & TOC
 ├── intro.md             # Landing page
 ├── developer-notes.md   # This file
 ├── requirements.txt     # Python dependencies
@@ -63,24 +68,25 @@ yamc-verification/
 2. Update `NUCLEAR_DATA` variable to the new library name
 3. Add the library path to `NUCLEAR_DATA_DIR` dictionary
 4. Update the markdown title and description
-5. Add the new notebook to `_toc.yml`
+5. Add the new notebook to the `toc` section in `myst.yml`
 
 ## Adding a New Model
 
 1. Create a new directory under `tasks/` (e.g., `tasks/cylinder/`)
 2. Create notebooks for each nuclear data library
-3. Add a new `parts` section in `_toc.yml`:
+3. Add a new section to the `toc` in `myst.yml`:
 
 ```yaml
-parts:
-  - caption: Sphere Model
-    chapters:
-      - file: tasks/sphere/endf-b8.0
-      - file: tasks/sphere/fendl-3.2c
-  - caption: Cylinder Model
-    chapters:
-      - file: tasks/cylinder/endf-b8.0
-      - file: tasks/cylinder/fendl-3.2c
+toc:
+  - file: intro.md
+  - title: Sphere Model
+    children:
+      - file: tasks/sphere/endf-b8.0.ipynb
+      - file: tasks/sphere/fendl-3.2c.ipynb
+  - title: Cylinder Model
+    children:
+      - file: tasks/cylinder/endf-b8.0.ipynb
+      - file: tasks/cylinder/fendl-3.2c.ipynb
 ```
 
 ## Configuration
@@ -98,10 +104,17 @@ Each notebook has configurable parameters in the setup cell:
 
 ### Notebook Execution
 
-Configured in `_config.yml`:
+Notebooks are not executed during the build. Run them in-place before building:
 
-- `execute_notebooks: auto` - Only re-run if source changed
-- `timeout: 600` - 10 minute timeout per notebook
+```bash
+jupyter nbconvert --to notebook --execute --inplace tasks/*/*.ipynb
+```
+
+To clear all notebook outputs (e.g. before committing):
+
+```bash
+jupyter nbconvert --ClearOutputPreprocessor.enabled=True --to notebook --inplace tasks/*/*.ipynb
+```
 
 ## Troubleshooting
 
@@ -110,14 +123,14 @@ Configured in `_config.yml`:
 Check the error in the build output. Common issues:
 - Missing nuclear data files, perhaps correct the data path used
 - OpenMC/YAMC not installed in the virtual environment
-- Timeout exceeded (increase in `_config.yml`)
+- Timeout exceeded (increase in `myst.yml`)
 
 
 ### Cache issues
 
-Clear the Jupyter cache if notebooks aren't re-executing properly:
+Clear the build cache if pages aren't rebuilding properly:
 
 ```bash
-rm -rf _build/.jupyter_cache
+jupyter-book clean .
 jupyter-book build .
 ```
