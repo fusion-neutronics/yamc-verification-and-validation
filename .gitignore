@@ -218,3 +218,5 @@ __marimo__/
 *.xml
 *.h5
 *.html
+*.csv
+*.json
