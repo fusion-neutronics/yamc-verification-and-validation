@@ -5,30 +5,40 @@ project:
     - name: YAMC Team
   toc:
     - file: intro.md
-    - title: Sphere Model
+    - title: Neutron
       children:
-        - file: tasks/sphere/endf-b8.1.ipynb
-          title: ENDF/B-VIII.1
-        - file: tasks/sphere/fendl-3.2c.ipynb
-          title: FENDL-3.2c
-    - title: Broomstick Model
+        - title: Sphere
+          children:
+            - file: tasks/neutron/sphere/endf-b8.1.ipynb
+              title: ENDF/B-VIII.1
+            # - file: tasks/neutron/sphere/fendl-3.2c.ipynb
+            #   title: FENDL-3.2c
+    - title: Photon
       children:
-        - file: tasks/broomstick/endf-b8.1.ipynb
-          title: ENDF/B-VIII.1
-        - file: tasks/broomstick/fendl-3.2c.ipynb
-          title: FENDL-3.2c
-    - title: Coupled Neutron-Photon
+        - title: Broomstick
+          children:
+            - file: tasks/photon/broomstick/endf-b8.1.ipynb
+              title: ENDF/B-VIII.1
+            # - file: tasks/photon/broomstick/fendl-3.2c.ipynb
+            #   title: FENDL-3.2c
+    - title: Coupled Photon
       children:
-        - file: tasks/coupled/endf-b8.1.ipynb
-          title: ENDF/B-VIII.1
-    - title: Material Depletion
+        - title: Broomstick
+          children:
+            - file: tasks/coupled-photon/broomstick/endf-b8.1.ipynb
+              title: ENDF/B-VIII.1
+    - title: Decay Photon
       children:
-        - file: tasks/depletion/endf-b8.1.ipynb
-          title: ENDF/B-VIII.1
-    - title: D1S Decay Photon
+        - title: Broomstick
+          children:
+            - file: tasks/decay-photon/broomstick/endf-b8.1.ipynb
+              title: ENDF/B-VIII.1
+    - title: Transmutation
       children:
-        - file: tasks/d1s/endf-b8.1.ipynb
-          title: ENDF/B-VIII.1
+        - title: Material
+          children:
+            - file: tasks/transmutation/material/endf-b8.1.ipynb
+              title: ENDF/B-VIII.1
     - title: Reference
       children:
         - file: developer-notes.md
@@ -42,7 +52,10 @@ project:
     - verify.py
     - LICENSE
     - README.md
+    # FENDL data not yet available; uncomment when added.
+    - tasks/neutron/sphere/fendl-3.2c.ipynb
+    - tasks/photon/broomstick/fendl-3.2c.ipynb
 site:
   options:
     logo: ""
-    navigation_depth: 3
+    navigation_depth: 5
