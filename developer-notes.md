@@ -116,6 +116,27 @@ To clear all notebook outputs (e.g. before committing):
 jupyter nbconvert --ClearOutputPreprocessor.enabled=True --to notebook --inplace tasks/*/*.ipynb
 ```
 
+#### Test vs full mode
+
+Each notebook iterates over many nuclides or elements. For a quick smoke test
+without re-running everything, set `YAMC_VERIFY_NUMBER_OF_SIMULATIONS` to clip
+the iteration list to the first N items:
+
+```bash
+# Smoke test: first 5 nuclides only
+YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 jupyter nbconvert --to notebook --execute --inplace tasks/sphere/endf-b8.1.ipynb
+
+# All notebooks, first 5 each
+YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 jupyter nbconvert --to notebook --execute --inplace tasks/*/*.ipynb
+
+# Full run (unset or 0)
+jupyter nbconvert --to notebook --execute --inplace tasks/sphere/endf-b8.1.ipynb
+```
+
+`PARTICLES` and `BATCHES` are intentionally not exposed via env vars. Lowering
+them produces statistical noise that masquerades as YAMC/OpenMC disagreement,
+which would defeat the purpose of verification.
+
 ## Troubleshooting
 
 ### Notebook execution fails
