@@ -137,6 +137,27 @@ jupyter nbconvert --to notebook --execute --inplace tasks/sphere/endf-b8.1.ipynb
 them produces statistical noise that masquerades as YAMC/OpenMC disagreement,
 which would defeat the purpose of verification.
 
+#### Selecting which codes/backends to run
+
+By default each notebook runs OpenMC plus YAMC on both CPU and GPU. To pick a
+subset, set the `MC_BACKENDS` env var to a comma-separated list of tokens.
+Valid tokens: `openmc-cpu`, `yamc-cpu`, `yamc-gpu`. Any one, two, or all three
+may be selected.
+
+```bash
+# Compare yamc cpu and yamc gpu only (skip OpenMC)
+MC_BACKENDS=yamc-cpu,yamc-gpu jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
+
+# OpenMC vs yamc cpu only (no GPU; useful on CI runners without an f64 Vulkan adapter)
+MC_BACKENDS=openmc-cpu,yamc-cpu jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
+
+# Default: all three
+jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
+```
+
+When `openmc-cpu` is excluded, the ratio panel and rel-diff columns use the
+first YAMC backend in `MC_BACKENDS` as the reference instead.
+
 ## Troubleshooting
 
 ### Notebook execution fails
