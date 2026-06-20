@@ -158,6 +158,30 @@ jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8
 When `openmc-cpu` is excluded, the ratio panel and rel-diff columns use the
 first YAMC backend in `MC_BACKENDS` as the reference instead.
 
+### Results cache
+
+Simulation results are cached as JSON under
+`tasks/<model>/<...>/cache/<library>/<code>/<nuclide>.json` (via `cache_utils.py`),
+so re-running a notebook to iterate on plots does not re-run the simulations.
+Two invalidation policies:
+
+- **OpenMC** results are keyed by the run parameters only (library, particles,
+  batches, source energy). OpenMC is fixed, so these stay valid until a
+  parameter changes.
+- **YAMC** results are additionally keyed by the **yamc version and git
+  commit** (`cache_utils.yamc_fingerprint()`). When you rebuild or update yamc
+  (a new release, or a new commit for an editable/source install) the cache
+  auto-invalidates and the affected simulations re-run on the next notebook
+  execution. The version string does not bump per development build, so the git
+  commit is what catches day-to-day changes; on a wheel install with no git
+  checkout the commit is `null` and invalidation falls back to the version.
+
+To force everything to re-run, delete the cache directories:
+
+```bash
+rm -rf tasks/*/*/cache
+```
+
 ## Troubleshooting
 
 ### Notebook execution fails
