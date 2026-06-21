@@ -4,7 +4,7 @@ This page documents how to build and maintain the YAMC Verification Jupyter Book
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.10+
 - OpenMC and YAMC installed
 - Nuclear data libraries (ENDF/B-VIII.0, FENDL-3.2c, etc.)
 
