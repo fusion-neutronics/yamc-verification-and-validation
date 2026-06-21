@@ -1,5 +1,5 @@
 --extra-index-url https://shimwell.github.io/wheels
-jupyter-book>=2.0.0
+jupyter-book>=2.1.5
 nbconvert
 numpy
 pandas
