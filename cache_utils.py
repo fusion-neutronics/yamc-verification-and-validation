@@ -9,12 +9,15 @@ Each cache entry is a single JSON file at
 Numpy arrays are encoded as ``{"_np_array": [...], "_dtype": "..."}`` and
 restored on load. The cache is invalidated automatically when the metadata
 in the cached file does not match the metadata passed by the caller (e.g.
-``PARTICLES`` or ``BATCHES`` changed) — the simulation is re-run and the
+``PARTICLES`` or ``BATCHES`` changed), so the simulation is re-run and the
 cache file overwritten.
 
-The module is imported by the notebooks under ``tasks/`` to avoid running
-the (slow, deterministic) reference OpenMC simulations every notebook
-session. The same helpers are intended to cache YAMC results in the future.
+The module is imported by the notebooks under ``tasks/`` to avoid re-running
+simulations every notebook session. OpenMC reference results are keyed by run
+parameters only (OpenMC is fixed); YAMC results additionally fold
+:func:`yamc_fingerprint` into their metadata, so the cache auto-invalidates and
+the simulation re-runs whenever the installed yamc version or git commit
+changes.
 """
 
 from __future__ import annotations
@@ -127,3 +130,47 @@ def cached_or_run(
     if verbose:
         print(f"  {code}: cached to {p}")
     return dict(results)
+
+
+def _yamc_git_commit() -> Optional[str]:
+    """Short git commit of the installed yamc source, or ``None``.
+
+    Only meaningful for an editable / source install where ``yamc.__file__``
+    lives inside a git checkout (the usual yamc development setup); returns
+    ``None`` for a packaged wheel install with no surrounding repository.
+    """
+    try:
+        import subprocess
+
+        import yamc
+
+        src = Path(yamc.__file__).resolve()
+        for parent in src.parents:
+            if (parent / ".git").exists():
+                out = subprocess.run(
+                    ["git", "-C", str(parent), "rev-parse", "--short", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                return out.stdout.strip() if out.returncode == 0 else None
+        return None
+    except Exception:
+        return None
+
+
+def yamc_fingerprint() -> dict:
+    """Identity of the installed yamc, for cache invalidation.
+
+    Returns ``{"yamc_version": yamc.__version__, "yamc_commit": ...}``. Fold
+    this into the ``meta`` of a YAMC cache entry so the cache invalidates
+    automatically (and the simulation re-runs) whenever the installed yamc
+    changes: a new released version, or a new git commit for an editable /
+    source install. The version string does not bump per development build, so
+    the commit is what catches day-to-day changes. The commit is ``None`` for a
+    packaged wheel install with no surrounding git checkout, leaving the version
+    as the invalidation key.
+    """
+    import yamc
+
+    return {"yamc_version": yamc.__version__, "yamc_commit": _yamc_git_commit()}
