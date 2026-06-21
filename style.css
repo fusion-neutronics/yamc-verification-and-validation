@@ -1,0 +1,9 @@
+/* Site style overrides for the YAMC Verification book.
+ *
+ * Hide the "Made with MyST" footer badge. The book theme has no boolean
+ * option to remove it (only a `primary_sidebar_footer` part to replace it),
+ * so we target its link directly. The badge links to
+ * https://mystmd.org/made-with-myst, which makes for a precise selector. */
+a[href*="made-with-myst"] {
+  display: none !important;
+}

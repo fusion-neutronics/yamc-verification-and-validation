@@ -1,8 +1,6 @@
 version: 1
 project:
   title: YAMC Verification
-  authors:
-    - name: YAMC Team
   toc:
     - file: intro.md
     - title: Neutron
@@ -33,11 +31,15 @@ project:
               title: ENDF/B-VIII.1
             # - file: tasks/photon/sphere/fendl-3.2c.ipynb
             #   title: FENDL-3.2c
-    - title: Coupled Photon
+    - title: Secondary Photon
       children:
         - title: Broomstick
           children:
-            - file: tasks/coupled-photon/broomstick/endf-b8.1.ipynb
+            - file: tasks/secondary-photon/broomstick/endf-b8.1.ipynb
+              title: ENDF/B-VIII.1
+        - title: Sphere
+          children:
+            - file: tasks/secondary-photon/sphere/endf-b8.1.ipynb
               title: ENDF/B-VIII.1
     - title: Decay Photon
       children:
@@ -45,11 +47,19 @@ project:
           children:
             - file: tasks/decay-photon/broomstick/endf-b8.1.ipynb
               title: ENDF/B-VIII.1
+        - title: Sphere
+          children:
+            - file: tasks/decay-photon/sphere/endf-b8.1.ipynb
+              title: ENDF/B-VIII.1
     - title: Transmutation
       children:
-        - title: Material
+        - title: Material + Flux Spectrum
           children:
-            - file: tasks/transmutation/material/endf-b8.1.ipynb
+            - file: tasks/transmutation/material-flux-spectrum/endf-b8.1.ipynb
+              title: ENDF/B-VIII.1
+        - title: Material + Reaction Rate
+          children:
+            - file: tasks/transmutation/material-reaction-rate/endf-b8.1.ipynb
               title: ENDF/B-VIII.1
     - file: developer-notes.md
       title: Developer Notes
@@ -71,3 +81,5 @@ site:
   options:
     logo: ""
     navigation_depth: 5
+    hide_authors: true
+    style: style.css
