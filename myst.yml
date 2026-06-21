@@ -51,10 +51,8 @@ project:
           children:
             - file: tasks/transmutation/material/endf-b8.1.ipynb
               title: ENDF/B-VIII.1
-    - title: Reference
-      children:
-        - file: developer-notes.md
-          title: Developer Notes
+    - file: developer-notes.md
+      title: Developer Notes
   error_rules:
     - myst-file-loads
   exclude:
