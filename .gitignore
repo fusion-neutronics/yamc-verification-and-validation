@@ -218,3 +218,6 @@ __marimo__/
 *.xml
 *.h5
 *.html
+
+# Generated reduced transmutation chains (regenerated per notebook run)
+*.chain.arrow
