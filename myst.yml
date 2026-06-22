@@ -70,6 +70,7 @@ project:
     - _build/**
     - "**.ipynb_checkpoints"
     - verify.py
+    - run_models.sh
     - LICENSE
     - README.md
     # FENDL data not yet available; uncomment when added.
@@ -79,7 +80,8 @@ project:
     - tasks/neutron/broomstick/fendl-3.2c.ipynb
 site:
   options:
-    logo: ""
+    logo: logo.png
+    favicon: logo.png
     navigation_depth: 5
     hide_authors: true
     style: style.css
