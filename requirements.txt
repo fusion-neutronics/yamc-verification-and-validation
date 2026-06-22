@@ -6,3 +6,4 @@ pandas
 plotly>=5.0.0
 kaleido
 openmc
+openmc_data>=2.4.0
