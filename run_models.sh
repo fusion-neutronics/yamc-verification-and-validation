@@ -16,9 +16,6 @@
 # Notebooks run in place (outputs written back); the cache lands in
 # tasks/<physics>/<geometry>/cache/. Run `git restore tasks` afterwards if you
 # only want the cache and not the notebook-output changes.
-#
-# Note: secondary-photon and transmutation notebooks do not read MC_BACKENDS,
-# so they always run yamc as well as OpenMC (they still cache the OpenMC side).
 
 set -uo pipefail
 cd "$(dirname "$0")"
