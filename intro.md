@@ -5,6 +5,7 @@ This project provides verification of [YAMC](https://github.com/yamc/yamc) by co
 - **Geometries**
 - **Nuclear data libraries**
 - **Materials**
+- **Particle simulation modes**
 
 ## What's Compared
 
