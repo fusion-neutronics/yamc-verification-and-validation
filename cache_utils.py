@@ -132,6 +132,71 @@ def cached_or_run(
     return dict(results)
 
 
+def select_requested(items, *, kind, key=None):
+    """Filter a discovered nuclide/element list using the verification env vars.
+
+    Selection priority (highest first):
+
+    1. **Explicit list** - ``YAMC_VERIFY_NUCLIDES`` (when ``kind="nuclide"``) or
+       ``YAMC_VERIFY_ELEMENTS`` (when ``kind="element"``): a comma-separated
+       list naming the exact items to run. The returned order follows the
+       request, so ``YAMC_VERIFY_NUCLIDES=Fe56`` runs only Fe56.
+    2. **Count cap** - ``YAMC_VERIFY_NUMBER_OF_SIMULATIONS``: keep the first N
+       discovered items (the existing smoke-test behaviour).
+    3. **Full list** - neither env var set.
+
+    Parameters
+    ----------
+    items : list
+        Discovered candidates: bare strings (e.g. ``"Fe56"``, ``"Fe"``), or
+        tuples/objects whose comparison key is extracted by ``key``.
+    kind : {"nuclide", "element"}
+        Selects which explicit-list env var applies. Element-based notebooks
+        (photon) pass ``"element"``; everything else passes ``"nuclide"``.
+    key : callable, optional
+        Maps an item to its string key (default: identity). Pass
+        ``lambda t: t[0]`` for tuple lists such as ``(name, path, ...)``.
+
+    Raises
+    ------
+    ValueError
+        If an explicitly requested item is not present in the discovered list
+        (catches typos and unavailable data rather than silently running
+        nothing).
+    """
+    import os
+
+    if key is None:
+        def key(x):
+            return x
+
+    env_name = {
+        "nuclide": "YAMC_VERIFY_NUCLIDES",
+        "element": "YAMC_VERIFY_ELEMENTS",
+    }[kind]
+
+    raw = os.environ.get(env_name, "").strip()
+    if raw:
+        requested = [t.strip() for t in raw.split(",") if t.strip()]
+        by_key: dict = {}
+        for it in items:
+            by_key.setdefault(key(it), it)
+        missing = [r for r in requested if r not in by_key]
+        if missing:
+            available = sorted(by_key)
+            raise ValueError(
+                f"{env_name}={raw!r} requested {missing}, which is not among "
+                f"the {len(available)} discovered {kind}(s). "
+                f"Available (first 40): {available[:40]}"
+            )
+        return [by_key[r] for r in requested]
+
+    cap = int(os.environ.get("YAMC_VERIFY_NUMBER_OF_SIMULATIONS", "0")) or None
+    if cap:
+        return items[:cap]
+    return items
+
+
 def _yamc_git_commit() -> Optional[str]:
     """Short git commit of the installed yamc source, or ``None``.
 

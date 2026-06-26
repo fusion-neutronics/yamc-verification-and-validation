@@ -14,10 +14,16 @@ YAMC is used as an editable install from a sibling `yamc` checkout (`../yamc`).
 ## Running the verification models
 
 `run_models.sh` executes the model notebooks in place and populates the on-disk
-results cache. Two environment variables control it:
+results cache. Environment variables control it:
 
 - `MC_BACKENDS` - comma-separated list of `openmc-cpu`, `yamc-cpu`, `yamc-gpu` (default: `openmc-cpu`).
-- `YAMC_VERIFY_NUMBER_OF_SIMULATIONS` - cap on nuclides/elements per model (default: `3`).
+- `YAMC_VERIFY_NUCLIDES` - comma-separated list naming the exact isotope(s) to run
+  on the nuclide-based models (neutron, secondary-photon, decay-photon, transmutation),
+  e.g. `Fe56`. Overrides the count cap.
+- `YAMC_VERIFY_ELEMENTS` - comma-separated list naming the exact element(s) to run on
+  the photon models, e.g. `Fe`. Overrides the count cap.
+- `YAMC_VERIFY_NUMBER_OF_SIMULATIONS` - cap on nuclides/elements per model when no
+  explicit list is given (default: `3`).
 
 Examples:
 
@@ -30,6 +36,10 @@ MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
 
 # yamc + OpenMC, 10 nuclides/elements per model
 YAMC_VERIFY_NUMBER_OF_SIMULATIONS=10 MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
+
+# one specific isotope/element through every model on all three codes
+YAMC_VERIFY_NUCLIDES=Fe56 YAMC_VERIFY_ELEMENTS=Fe \
+  MC_BACKENDS=openmc-cpu,yamc-cpu,yamc-gpu ./run_models.sh
 
 # a single model
 MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh tasks/transmutation/material-reaction-rate/endf-b8.1.ipynb
