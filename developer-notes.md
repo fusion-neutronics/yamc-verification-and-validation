@@ -107,14 +107,27 @@ Each notebook has configurable parameters in the setup cell:
 Notebooks are not executed during the build. Run them in-place before building:
 
 ```bash
-jupyter nbconvert --to notebook --execute --inplace tasks/*/*.ipynb
+jupyter nbconvert --to notebook --execute --inplace tasks/*/*/*.ipynb
 ```
 
 To clear all notebook outputs (e.g. before committing):
 
 ```bash
-jupyter nbconvert --ClearOutputPreprocessor.enabled=True --to notebook --inplace tasks/*/*.ipynb
+jupyter nbconvert --ClearOutputPreprocessor.enabled=True --to notebook --inplace tasks/*/*/*.ipynb
 ```
+
+#### Git hooks
+
+A pre-commit hook that clears notebook outputs automatically (keeping diffs
+source-only) is tracked in `.githooks/`. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It strips outputs from `tasks/*/*/*.ipynb` and re-stages them. If `jupyter` is
+not on `PATH` it falls back to `python -m nbconvert`, and if neither is
+available it prints a warning rather than blocking the commit.
 
 #### Test vs full mode
 
@@ -124,13 +137,13 @@ the iteration list to the first N items:
 
 ```bash
 # Smoke test: first 5 nuclides only
-YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 jupyter nbconvert --to notebook --execute --inplace tasks/sphere/endf-b8.1.ipynb
+YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
 
 # All notebooks, first 5 each
-YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 jupyter nbconvert --to notebook --execute --inplace tasks/*/*.ipynb
+YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 jupyter nbconvert --to notebook --execute --inplace tasks/*/*/*.ipynb
 
 # Full run (unset or 0)
-jupyter nbconvert --to notebook --execute --inplace tasks/sphere/endf-b8.1.ipynb
+jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
 ```
 
 `PARTICLES` and `BATCHES` are intentionally not exposed via env vars. Lowering

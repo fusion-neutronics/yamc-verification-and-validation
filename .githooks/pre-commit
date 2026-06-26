@@ -1,0 +1,24 @@
+#!/bin/bash
+# Clear notebook outputs before committing so diffs stay source-only.
+# Enable once per clone with:  git config core.hooksPath .githooks
+set -euo pipefail
+shopt -s nullglob
+
+# Model notebooks live three levels deep: tasks/<category>/<geometry>/<lib>.ipynb
+nbs=(tasks/*/*/*.ipynb)
+if [ ${#nbs[@]} -eq 0 ]; then
+    exit 0
+fi
+
+if command -v jupyter >/dev/null 2>&1; then
+    nbconvert=(jupyter nbconvert)
+elif python -c "import nbconvert" >/dev/null 2>&1; then
+    nbconvert=(python -m nbconvert)
+else
+    echo "pre-commit: jupyter/nbconvert not on PATH; skipping notebook output stripping." >&2
+    echo "            activate the project venv (or 'pip install nbconvert') to auto-clear outputs." >&2
+    exit 0
+fi
+
+"${nbconvert[@]}" --ClearOutputPreprocessor.enabled=True --to notebook --inplace "${nbs[@]}"
+git add "${nbs[@]}"
