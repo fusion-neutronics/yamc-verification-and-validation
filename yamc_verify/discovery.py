@@ -131,20 +131,29 @@ def discover_coupled_nuclides(nuclear_data_dir: str, library: str, run_openmc: b
 
 # ---- transmutation-chain-backed discovery (decay-photon, transmutation) ----
 def resolve_openmc_chain(library: str) -> str:
-    """Resolve the OpenMC depletion-chain XML path for ``library`` (best effort)."""
+    """Resolve the OpenMC depletion-chain XML path for ``library`` (best effort).
+
+    Uses the *SFR* chain variant: the yamc side is hardwired to the SFR
+    transmutation network (:func:`transmutation_data_path`), and every cached
+    OpenMC reference was produced with ``chain_endf_b8.1_sfr.xml``. The
+    original notebooks resolved the SFR chain; the ``yamc_verify`` extraction
+    accidentally dropped the ``_sfr`` suffix, silently switching new runs to
+    the full chain and invalidating comparisons against the SFR-chain caches.
+    """
+    stem = f"chain_{library.replace('-', '_')}_sfr.xml"
     candidates = [
-        f"/home/jon/yamc-org/openmc_data/src/openmc_data/depletion/chain_{library.replace('-', '_')}.xml",
-        "/home/jon/yamc-org/openmc_data/src/openmc_data/depletion/chain_endf_b8.1.xml",
+        f"/home/jon/yamc-org/openmc_data/src/openmc_data/depletion/{stem}",
+        "/home/jon/yamc-org/openmc_data/src/openmc_data/depletion/chain_endf_b8.1_sfr.xml",
     ]
     try:
         import openmc_data as _omc_data
 
         candidates.append(os.path.join(
-            os.path.dirname(_omc_data.__file__), "depletion", "chain_endf_b8.1.xml"))
+            os.path.dirname(_omc_data.__file__), "depletion", "chain_endf_b8.1_sfr.xml"))
     except Exception:
         pass
     candidates += sorted(glob.glob(
-        "/home/jon/*/.venv/lib/python*/site-packages/openmc_data/depletion/chain_endf_b8.1.xml"))
+        "/home/jon/*/.venv/lib/python*/site-packages/openmc_data/depletion/chain_endf_b8.1_sfr.xml"))
     return next((p for p in candidates if os.path.exists(p)), candidates[0])
 
 
