@@ -450,7 +450,13 @@ def discover(task: Task, run_openmc: bool) -> list[str]:
 
 
 def _metas(task: Task):
-    """OpenMC cache meta, geometry-dependent to byte-match the original notebooks."""
+    """OpenMC + YAMC cache metas, geometry-dependent to byte-match the notebooks.
+
+    The YAMC meta folds in ``yamc_fingerprint()`` so the YAMC cache auto-
+    invalidates on a new yamc build (same policy as neutron).
+    """
+    from cache_utils import yamc_fingerprint
+
     openmc_meta = {
         "library": task.library,
         "particles": task.particles,
@@ -462,7 +468,8 @@ def _metas(task: Task):
     elif task.geometry == "broomstick":
         openmc_meta["cylinder_radius"] = task.dims.cylinder_radius
         openmc_meta["cylinder_half_height"] = task.dims.cylinder_half_height
-    return openmc_meta
+    yamc_meta = {**openmc_meta, **yamc_fingerprint()}
+    return openmc_meta, yamc_meta
 
 
 def run_all(task: Task, backends=None, cache_dir: str = "cache"):
@@ -470,13 +477,13 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
 
     ``cache_dir`` is resolved relative to the current working directory, which
     when run under nbconvert is the notebook's own directory (so the default
-    ``"cache"`` lands in ``tasks/photon/<geometry>/cache`` as before). Only
-    OpenMC is cached; YAMC runs live.
+    ``"cache"`` lands in ``tasks/photon/<geometry>/cache`` as before). Both
+    OpenMC and YAMC are cached (YAMC keyed by build fingerprint).
     """
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
-    openmc_meta = _metas(task)
+    openmc_meta, yamc_meta = _metas(task)
     elements = discover(task, b.run_openmc)
     print(f"Running photon simulations for {len(elements)} elements: {elements}")
 
@@ -495,7 +502,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
             try:
                 per[f"yamc-{compute}"] = run_step(
                     cache_dir, task.library, f"yamc-{compute}", element, _run,
-                    meta=None, cache=task.caches_yamc)
+                    meta=yamc_meta, cache=task.caches_yamc)
                 if first_yamc_model is None and "model" in captured:
                     first_yamc_model = captured["model"]
             except Exception as e:  # noqa: BLE001 - isolate backend failures

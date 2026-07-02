@@ -521,18 +521,26 @@ def _openmc_meta(task: Task) -> dict:
     return meta
 
 
+def _yamc_meta(task: Task) -> dict:
+    """YAMC D1S cache metadata: the OpenMC meta plus the build fingerprint."""
+    from cache_utils import yamc_fingerprint
+
+    return {**_openmc_meta(task), **yamc_fingerprint()}
+
+
 def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     """Run every backend for every discovered nuclide. Returns (all_results, first_yamc_model).
 
     ``cache_dir`` is resolved relative to the current working directory, which
     when run under nbconvert is the notebook's own directory (so the default
-    ``"cache"`` lands in ``tasks/<family>/<geometry>/cache`` as before). Only
-    OpenMC is cached (``caches_yamc=False``); YAMC runs live each time.
+    ``"cache"`` lands in ``tasks/<family>/<geometry>/cache`` as before). Both
+    OpenMC and YAMC are cached (YAMC keyed by build fingerprint).
     """
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
     openmc_meta = _openmc_meta(task)
+    yamc_meta = _yamc_meta(task)
     timesteps = task.extras["timesteps"]
     phases = task.extras["phases"]
 
@@ -576,7 +584,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                 print(f"  Running YAMC D1S ({compute})...")
                 yamc_result = run_step(
                     cache_dir, task.library, f"yamc-{compute}", nuclide, _run,
-                    meta=None, cache=task.caches_yamc,
+                    meta=yamc_meta, cache=task.caches_yamc,
                 )
                 yamc_by_compute[compute] = yamc_result
                 if first_yamc_model is None and "model" in captured:

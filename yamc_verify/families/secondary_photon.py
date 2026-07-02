@@ -733,6 +733,8 @@ def discover(task: Task, run_openmc: bool) -> list[tuple]:
 
 
 def _metas(task: Task):
+    from cache_utils import yamc_fingerprint
+
     openmc_meta = {
         "library": task.library,
         "electron_treatment": task.extras["electron_treatment"],
@@ -747,7 +749,8 @@ def _metas(task: Task):
     else:
         openmc_meta["cylinder_radius"] = task.dims.cylinder_radius
         openmc_meta["cylinder_half_height"] = task.dims.cylinder_half_height
-    return openmc_meta
+    yamc_meta = {**openmc_meta, **yamc_fingerprint()}
+    return openmc_meta, yamc_meta
 
 
 def run_all(task: Task, backends=None, cache_dir: str = "cache"):
@@ -756,13 +759,13 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     Returns ``(all_results, first_yamc_model)``. ``cache_dir`` is resolved
     relative to the current working directory (the notebook's own directory
     under nbconvert), so the default ``"cache"`` lands in
-    ``tasks/secondary-photon/<geometry>/cache`` as before. Only OpenMC is
-    cached; YAMC is always re-run live (``caches_yamc=False``).
+    ``tasks/secondary-photon/<geometry>/cache`` as before. Both OpenMC and
+    YAMC are cached (YAMC keyed by build fingerprint).
     """
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
-    openmc_meta = _metas(task)
+    openmc_meta, yamc_meta = _metas(task)
     nuclides = discover(task, b.run_openmc)
     print(f"Running coupled simulations for {len(nuclides)} nuclides...")
     for nuc, _, elem, _ in nuclides:
@@ -797,7 +800,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
             try:
                 yamc_results = run_step(
                     cache_dir, task.library, f"yamc-{compute}", nuclide, _run,
-                    meta=None, cache=task.caches_yamc)
+                    meta=yamc_meta, cache=task.caches_yamc)
                 per_nuclide[f'yamc-{compute}'] = yamc_results
                 if first_yamc_model is None and "model" in captured:
                     first_yamc_model = captured["model"]
