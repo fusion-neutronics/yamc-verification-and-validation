@@ -76,36 +76,36 @@ for _lib, _parts in (("endf-b8.1", 5_000_000), ("fendl-3.2c", 500_000)):
          item_kind="nuclide", codes=_mc_codes(), caches_yamc=True,
          particles=_parts, batches=10, source_energy=14.06e6, dims=_BROOM)
 
-# ---- photon (element; caches only OpenMC) ---------------------------------
+# ---- photon (element; caches YAMC) ----------------------------------------
 for _lib, _parts in (("endf-b8.1", 5_000_000), ("fendl-3.2c", 500_000)):
     _reg(key=f"photon/sphere/{_lib}", notebook=f"tasks/photon/sphere/{_lib}.ipynb",
          family="photon", geometry="sphere", library=_lib, label="photon sphere",
-         item_kind="element", codes=_mc_codes(), caches_yamc=False,
+         item_kind="element", codes=_mc_codes(), caches_yamc=True,
          particles=_parts, batches=10, source_energy=1.0e6, dims=_SPHERE,
          extras={"photon_group_structure": "CCFE-24-PHOTON"})
     _reg(key=f"photon/broomstick/{_lib}", notebook=f"tasks/photon/broomstick/{_lib}.ipynb",
          family="photon", geometry="broomstick", library=_lib, label="photon broomstick",
-         item_kind="element", codes=_mc_codes(), caches_yamc=False,
+         item_kind="element", codes=_mc_codes(), caches_yamc=True,
          particles=_parts, batches=10, source_energy=1.0e6, dims=_BROOM,
          extras={"photon_group_structure": "CCFE-24-PHOTON"})
 
-# ---- secondary-photon (coupled n+photon; nuclide; caches only OpenMC) ------
+# ---- secondary-photon (coupled n+photon; nuclide; caches YAMC) ------------
 for _geom, _dims, _nb in (("sphere", _SPHERE, "sphere"), ("broomstick", _BROOM, "broomstick")):
     _reg(key=f"secondary-photon/{_geom}/endf-b8.1",
          notebook=f"tasks/secondary-photon/{_nb}/endf-b8.1.ipynb",
          family="secondary-photon", geometry=_geom, library="endf-b8.1",
          label=f"secondary-photon {_geom}", item_kind="nuclide", codes=_mc_codes(),
-         caches_yamc=False, particles=5_000_000, batches=10, source_energy=14.06e6, dims=_dims,
+         caches_yamc=True, particles=5_000_000, batches=10, source_energy=14.06e6, dims=_dims,
          extras={"neutron_group_structure": "VITAMIN-J-175",
                  "photon_group_structure": "VITAMIN-J-42", "electron_treatment": "led"})
 
-# ---- decay-photon (D1S; nuclide; caches only OpenMC) ----------------------
+# ---- decay-photon (D1S; nuclide; caches YAMC) -----------------------------
 for _geom, _dims, _nb in (("sphere", _SPHERE, "sphere"), ("broomstick", _BROOM, "broomstick")):
     _reg(key=f"decay-photon/{_geom}/endf-b8.1",
          notebook=f"tasks/decay-photon/{_nb}/endf-b8.1.ipynb",
          family="decay-photon", geometry=_geom, library="endf-b8.1",
          label=f"decay-photon {_geom}", item_kind="nuclide", codes=_mc_codes(),
-         caches_yamc=False, particles=5_000_000, batches=10, source_energy=14.06e6, dims=_dims,
+         caches_yamc=True, particles=5_000_000, batches=10, source_energy=14.06e6, dims=_dims,
          extras={"photon_group_structure": "VITAMIN-J-42", "reduce_level": 4,
                  "timesteps": [3600.0, 3600.0, 3600.0, 15 * 86400.0, 15 * 86400.0],
                  "source_rates": [1.0, 1.0, 1.0, 0.0, 0.0],
@@ -126,7 +126,7 @@ _reg(key="transmutation/material-flux-spectrum/endf-b8.1",
      notebook="tasks/transmutation/material-flux-spectrum/endf-b8.1.ipynb",
      family="transmutation-flux-spectrum", geometry="material", library="endf-b8.1",
      label="transmutation material-flux-spectrum", item_kind="nuclide",
-     codes=("openmc", "yamc"), caches_yamc=False,
+     codes=("openmc", "yamc"), caches_yamc=True,
      extras={"reduce_level": 4,
              "energy_groups": [1e-5, 0.625, 1e5, 2e7],
              "multigroup_flux": [1e12, 5e12, 1e14],

@@ -595,7 +595,9 @@ def _metas(task: Task, chain_file: str):
         openmc_meta = {**common, "total_particles": task.particles}
         yamc_meta = {**common, "total_particles": task.particles, **yamc_fingerprint()}
         return openmc_meta, yamc_meta
-    # flux-spectrum: OpenMC-only meta; YAMC is not cached.
+    # flux-spectrum: flux-driven material.transmute() (no transport).
+    from cache_utils import yamc_fingerprint
+
     openmc_meta = {
         "library": task.library,
         "chain_file": chain_file,
@@ -605,15 +607,24 @@ def _metas(task: Task, chain_file: str):
         "openmc_source_rates": list(task.extras["openmc_source_rates"]),
         "reduce_level": task.extras["reduce_level"],
     }
-    return openmc_meta, None
+    yamc_meta = {
+        "library": task.library,
+        "energy_groups": list(task.extras["energy_groups"]),
+        "multigroup_flux": list(task.extras["multigroup_flux"]),
+        "timesteps": list(task.extras["timesteps"]),
+        "yamc_source_rates": list(task.extras["yamc_source_rates"]),
+        "reduce_level": task.extras["reduce_level"],
+        **yamc_fingerprint(),
+    }
+    return openmc_meta, yamc_meta
 
 
 def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     """Run every backend for every discovered nuclide. Returns (all_results, first_yamc_model).
 
-    Dispatches on ``task.family``: the transport-coupled reaction-rate flow
-    (both backends cached) or the flux-driven flux-spectrum flow (OpenMC cached,
-    YAMC uncached, OpenMC chain reduced inline in the loop).
+    Dispatches on ``task.family``: the transport-coupled reaction-rate flow or
+    the flux-driven flux-spectrum flow (OpenMC chain reduced inline in the
+    loop). Both backends are cached in both flows.
 
     ``cache_dir`` is resolved relative to the current working directory, which
     when run under nbconvert is the notebook's own directory.
@@ -706,7 +717,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                     per["yamc"] = run_step(
                         cache_dir, task.library, "yamc", nuclide,
                         lambda n=nuclide: run_yamc_flux_spectrum(n, task, yamc_chain),
-                        meta=None, cache=task.caches_yamc)
+                        meta=yamc_meta, cache=task.caches_yamc)
                 except Exception as e:  # noqa: BLE001
                     print(f"  YAMC Error ({nuclide}): {e}")
             _finish_nuclide(per, all_results, nuclide, timesteps, phases)
