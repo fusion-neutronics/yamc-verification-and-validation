@@ -104,6 +104,24 @@ all_results, first_yamc_model = neutron.run_all(TASK, backends.resolve())
 neutron.display_results(TASK, all_results)
 ```
 
+## Auditing YAMC vs OpenMC agreement
+
+To find which nuclides / simulation modes disagree with OpenMC, scan the cache:
+
+```bash
+python -m yamc_verify.audit                 # rank all mismatches
+python -m yamc_verify.audit --worst 20       # only the 20 worst
+python -m yamc_verify.audit --current-only    # ignore stale-build YAMC caches
+```
+
+It compares every `(task, nuclide, backend)` for which both an OpenMC and a
+YAMC result are cached — reduced-χ² and flux-weighted relative difference of the
+flux spectrum plus the worst reaction-rate difference (neutron), or the worst
+nuclide-density difference across timesteps (transmutation) — and ranks the
+disagreements. Only modes that cache **both** codes can be audited offline;
+modes that cache OpenMC only are reported as "not auditable offline (run them to
+compare)".
+
 ## Using the latest yamc
 
 The notebooks import yamc as an editable install, but its compiled Rust core is
