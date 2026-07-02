@@ -25,10 +25,13 @@ jobs:
           python-version: "3.13"
 
       - name: Install build deps
-        run: pip install "jupyter-book>=2.0.0"
+        run: pip install "jupyter-book>=2.0.0" numpy pandas plotly
 
       - name: Build site
         run: jupyter-book build . --html
+
+      - name: Build benchmark index
+        run: python -m yamc_verify.index_builder --out _build/html/index.json
 
       - uses: actions/configure-pages@v5
 
