@@ -177,14 +177,15 @@ def main(argv=None):
           f"(reduced-chi2 >= {args.chi2} or rel.diff >= {args.reldiff}% or quality Fair/Poor)."
           + (f" [{stale_n} from an older YAMC build; --current-only to skip]" if stale_n else ""))
     print()
-    hdr = f"{'quality':10} {'chi2':>8} {'wavg%':>7} {'maxRR%':>8} {'worst':<14} {'mode':28} nuclide"
+    hdr = (f"{'quality':10} {'chi2':>8} {'wavg%':>7} {'maxRR%':>8} {'worst':<14} "
+           f"{'code':9} {'mode':28} nuclide")
     print(hdr)
     print("-" * len(hdr))
     for r in shown:
         mark = " *stale" if r.stale else ""
         chi2 = f"{r.chi2:8.2f}" if np.isfinite(r.chi2) else f"{'-':>8}"
         print(f"{r.quality:10} {chi2} {r.wavg_reldiff:7.1f} {r.max_tally_reldiff:8.1f} "
-              f"{r.worst_score:<14} {r.task:28} {r.nuclide}{mark}")
+              f"{r.worst_score:<14} {r.backend:9} {r.task:28} {r.nuclide}{mark}")
 
     if unauditable:
         print("\nNot auditable offline (YAMC not cached for these modes — run them to compare):")
