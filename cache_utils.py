@@ -29,6 +29,19 @@ from typing import Any, Callable, Mapping, Optional
 import numpy as np
 
 
+def _progress():
+    """Return the :mod:`yamc_verify.progress` module, or ``None`` if unavailable.
+
+    Kept lazy and defensive so ``cache_utils`` has no hard dependency on the
+    package and progress reporting can never break a simulation run.
+    """
+    try:
+        from yamc_verify import progress
+    except Exception:
+        return None
+    return progress
+
+
 def _encode(obj: Any) -> Any:
     if isinstance(obj, np.ndarray):
         return {"_np_array": obj.tolist(), "_dtype": str(obj.dtype)}
@@ -118,15 +131,36 @@ def cached_or_run(
     """Return cached results if available with matching ``meta``, else run and cache.
 
     ``run_fn`` is a zero-argument callable that returns a results dict.
+
+    Emits progress events (see :mod:`yamc_verify.progress`) so the verification
+    orchestrator can render a live dashboard: a ``cached`` event on a cache hit,
+    or an ``item_start`` / ``computed`` pair (with wall-clock seconds) on a run.
+    The wall time is also stored under ``elapsed_seconds`` in the cache metadata
+    so a later orchestrator run can seed its ETA estimate. Reporting is a no-op
+    outside an orchestrated run and never affects the returned results.
     """
+    import time
+
+    _p = _progress()
     cached = load_cached(cache_dir, library, code, key, expected_meta=meta)
     p = _cache_path(cache_dir, library, code, key)
     if cached is not None:
+        if _p:
+            _p.report_item(code, key, status="cached")
         if verbose:
             print(f"  {code}: loaded from cache ({p})")
         return cached
+    if _p:
+        _p.report_item_start(code, key)
+    t0 = time.perf_counter()
     results = run_fn()
-    save_cached(cache_dir, library, code, key, results, meta=meta)
+    dt = time.perf_counter() - t0
+    save_cached(
+        cache_dir, library, code, key, results,
+        meta={**dict(meta or {}), "elapsed_seconds": dt},
+    )
+    if _p:
+        _p.report_item(code, key, status="computed", seconds=dt)
     if verbose:
         print(f"  {code}: cached to {p}")
     return dict(results)
@@ -189,12 +223,15 @@ def select_requested(items, *, kind, key=None):
                 f"the {len(available)} discovered {kind}(s). "
                 f"Available (first 40): {available[:40]}"
             )
-        return [by_key[r] for r in requested]
+        result = [by_key[r] for r in requested]
+    else:
+        cap = int(os.environ.get("YAMC_VERIFY_NUMBER_OF_SIMULATIONS", "0")) or None
+        result = items[:cap] if cap else items
 
-    cap = int(os.environ.get("YAMC_VERIFY_NUMBER_OF_SIMULATIONS", "0")) or None
-    if cap:
-        return items[:cap]
-    return items
+    _p = _progress()
+    if _p:
+        _p.report_plan([key(it) for it in result], kind=kind)
+    return result
 
 
 def _yamc_git_commit() -> Optional[str]:

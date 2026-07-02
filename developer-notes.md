@@ -56,24 +56,45 @@ yamc-verification/
 ├── intro.md             # Landing page
 ├── developer-notes.md   # This file
 ├── requirements.txt     # Python dependencies
+├── run_models.sh        # -> python -m yamc_verify.orchestrator (live dashboard)
+├── cache_utils.py       # JSON results cache + progress-emitting cached_or_run/select_requested
+├── yamc_verify/         # Shared package (thin notebooks import from here)
+│   ├── tasks.py         # Task registry: one Task per notebook (config source of truth)
+│   ├── backends.py      # MC_BACKENDS parsing
+│   ├── geometry.py      # sphere/broomstick region builders (yamc + openmc)
+│   ├── discovery.py     # nuclide/element discovery per family
+│   ├── plotting.py      # generic spectrum-comparison plotting + metrics
+│   ├── progress.py      # progress side-channel (YAMC_VERIFY_PROGRESS)
+│   ├── plan.py          # up-front cached/to-do plan from the cache
+│   ├── dashboard.py     # live in-place terminal dashboard
+│   ├── orchestrator.py  # runs notebooks silently + tails progress
+│   └── families/        # per-physics runners/plots/run+display glue
+│       ├── neutron.py
+│       ├── photon.py
+│       ├── secondary_photon.py
+│       ├── decay_photon.py
+│       └── transmutation.py
 └── tasks/
-    └── sphere/          # Sphere model
-        ├── endf-b8.0.ipynb
-        └── fendl-3.2c.ipynb
+    └── <physics>/<geometry>/
+        ├── endf-b8.1.ipynb   # thin: task lookup + run_all + display_results
+        ├── fendl-3.2c.ipynb
+        └── cache/            # on-disk JSON results cache
 ```
 
 ## Adding a New Nuclear Data Library
 
-1. Copy an existing notebook (e.g., `endf-b8.0.ipynb`) to a new file
-2. Update `NUCLEAR_DATA` variable to the new library name
-3. Add the library path to `NUCLEAR_DATA_DIR` dictionary
-4. Update the markdown title and description
-5. Add the new notebook to the `toc` section in `myst.yml`
+1. Add the library path to `NUCLEAR_DATA_DIR` in `yamc_verify/tasks.py`
+2. Register a `Task` for each model/geometry using the new library (copy an
+   existing entry and change `library`/`particles`)
+3. Copy an existing thin notebook and point its `get_task("…")` at the new key
+4. Update the markdown title and add the notebook to `toc` in `myst.yml`
 
 ## Adding a New Model
 
-1. Create a new directory under `tasks/` (e.g., `tasks/cylinder/`)
-2. Create notebooks for each nuclear data library
+1. Add a new family module under `yamc_verify/families/` (or reuse one) and
+   register `Task`s for it in `yamc_verify/tasks.py`
+2. Create thin notebooks under `tasks/` that call the family's `run_all` /
+   `display_results`
 3. Add a new section to the `toc` in `myst.yml`:
 
 ```yaml
@@ -93,18 +114,35 @@ toc:
 
 ### Simulation Parameters
 
-Each notebook has configurable parameters in the setup cell:
+Per-notebook run parameters now live in the task registry
+(`yamc_verify/tasks.py`), one `Task` per notebook, rather than in each
+notebook's setup cell:
 
-| Parameter | Description |
-|-----------|-------------|
-| `PARTICLES` | Particles per batch |
-| `BATCHES` | Number of batches |
-| `SOURCE_ENERGY` | Neutron source energy (eV) |
-| `FLUX_DECADES` | Dynamic range for flux plots |
+| Field | Description |
+|-------|-------------|
+| `particles` | Particles per batch |
+| `batches` | Number of batches |
+| `source_energy` | Source energy (eV) |
+| `dims` | Geometry dimensions (sphere radius / cylinder radius+half-height) |
+| `codes` | Which codes this task can run |
+| `caches_yamc` | Whether YAMC results are cached on disk |
+| `extras` | Family-specific config (group structures, reduce levels, timesteps, …) |
+
+`particles`/`batches` are intentionally not exposed via env vars (lowering them
+produces statistical noise that masquerades as YAMC/OpenMC disagreement).
 
 ### Notebook Execution
 
-Notebooks are not executed during the build. Run them in-place before building:
+Notebooks are not executed during the build. Run them in-place before building.
+The recommended path is the orchestrator, which runs them quietly with a live
+progress dashboard (see the README):
+
+```bash
+./run_models.sh                 # all endf-b8.1 notebooks
+./run_models.sh tasks/neutron/sphere/endf-b8.1.ipynb
+```
+
+You can still drive `nbconvert` directly for a single notebook if needed:
 
 ```bash
 jupyter nbconvert --to notebook --execute --inplace tasks/*/*/*.ipynb

@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 #
-# Run the YAMC-verification model notebooks on a few nuclides/elements to
-# populate the on-disk results cache (e.g. the slow OpenMC reference results).
+# Run the YAMC-verification model notebooks with a live, in-place progress
+# dashboard (see yamc_verify/orchestrator.py) instead of scrolling output.
+# Each notebook is executed by jupyter nbconvert with its native output
+# captured, so the terminal shows only the indented task > code > counts view.
 #
 # Usage:
-#   ./run_models.sh                                  # 3 items each, OpenMC only (build cache)
+#   ./run_models.sh                                  # all endf-b8.1 notebooks
 #   YAMC_VERIFY_NUMBER_OF_SIMULATIONS=10 ./run_models.sh
 #   MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
-#   ./run_models.sh tasks/neutron/sphere/endf-b8.1.ipynb   # run specific notebook(s)
+#   ./run_models.sh tasks/neutron/sphere/endf-b8.1.ipynb   # specific notebook(s)
 #
-# Env vars (read by the notebooks themselves):
+# Env vars (read by the notebooks / orchestrator):
 #   YAMC_VERIFY_NUMBER_OF_SIMULATIONS  cap on nuclides/elements per notebook (default 3)
 #   MC_BACKENDS                        comma list of openmc-cpu,yamc-cpu,yamc-gpu (default openmc-cpu)
+#   YAMC_VERIFY_NUCLIDES / YAMC_VERIFY_ELEMENTS  explicit item list (overrides the cap)
 #
-# Notebooks run in place (outputs written back); the cache lands in
-# tasks/<physics>/<geometry>/cache/. Run `git restore tasks` afterwards if you
-# only want the cache and not the notebook-output changes.
+# Notebooks run in place (outputs written back). Run `git restore tasks` (or the
+# repo's clear-output pre-commit hook) afterwards if you only want the cache.
 
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -23,39 +25,8 @@ cd "$(dirname "$0")"
 export YAMC_VERIFY_NUMBER_OF_SIMULATIONS="${YAMC_VERIFY_NUMBER_OF_SIMULATIONS:-3}"
 export MC_BACKENDS="${MC_BACKENDS:-openmc-cpu}"
 
-# Prefer the repo virtualenv's jupyter; fall back to whatever is on PATH.
-JUPYTER=".venv/bin/jupyter"
-[ -x "$JUPYTER" ] || JUPYTER="jupyter"
+# Prefer the repo virtualenv's python; fall back to whatever is on PATH.
+PYTHON=".venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON="python"
 
-# Default to every endf-b8.1 model notebook (the FENDL variants have no data).
-if [ "$#" -gt 0 ]; then
-  notebooks=("$@")
-else
-  notebooks=(tasks/*/*/endf-b8.1.ipynb)
-fi
-
-echo "backends=$MC_BACKENDS  items/notebook=$YAMC_VERIFY_NUMBER_OF_SIMULATIONS  notebooks=${#notebooks[@]}"
-echo
-
-passed=()
-failed=()
-for nb in "${notebooks[@]}"; do
-  echo "=== $nb ==="
-  # timeout=-1 disables the per-cell timeout so full-statistics transport cells finish.
-  if "$JUPYTER" nbconvert --to notebook --execute --inplace \
-       --ExecutePreprocessor.timeout=-1 "$nb"; then
-    passed+=("$nb")
-  else
-    echo "!! FAILED: $nb"
-    failed+=("$nb")
-  fi
-  echo
-done
-
-echo "================ summary ================"
-echo "passed: ${#passed[@]} / ${#notebooks[@]}"
-if [ "${#failed[@]}" -gt 0 ]; then
-  echo "failed:"
-  printf '  %s\n' "${failed[@]}"
-  exit 1
-fi
+exec "$PYTHON" -m yamc_verify.orchestrator "$@"
