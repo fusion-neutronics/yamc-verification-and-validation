@@ -166,7 +166,7 @@ def cached_or_run(
     return dict(results)
 
 
-def select_requested(items, *, kind, key=None):
+def select_requested(items, *, kind, key=None, stable_getter=None):
     """Filter a discovered nuclide/element list using the verification env vars.
 
     Selection priority (highest first):
@@ -175,9 +175,13 @@ def select_requested(items, *, kind, key=None):
        ``YAMC_VERIFY_ELEMENTS`` (when ``kind="element"``): a comma-separated
        list naming the exact items to run. The returned order follows the
        request, so ``YAMC_VERIFY_NUCLIDES=Fe56`` runs only Fe56.
-    2. **Count cap** - ``YAMC_VERIFY_NUMBER_OF_SIMULATIONS``: keep the first N
-       discovered items (the existing smoke-test behaviour).
-    3. **Full list** - neither env var set.
+    2. **Count cap** - ``YAMC_VERIFY_NUMBER_OF_SIMULATIONS``:
+
+       * ``> 0`` keeps the first N discovered items (the smoke-test behaviour).
+       * ``0`` (or unset) keeps **every** discovered item.
+       * ``< 0`` (e.g. ``-1``) keeps every discovered item that is (or, for
+         elements, maps to) a **stable, non-radioactive** nuclide - see
+         ``stable_getter``.
 
     Parameters
     ----------
@@ -190,6 +194,14 @@ def select_requested(items, *, kind, key=None):
     key : callable, optional
         Maps an item to its string key (default: identity). Pass
         ``lambda t: t[0]`` for tuple lists such as ``(name, path, ...)``.
+    stable_getter : callable, optional
+        Zero-argument callable returning the set of *keys* considered stable
+        (stable nuclide names, or - for ``kind="element"`` - element symbols
+        that have a stable isotope). Called **only** when the cap is negative,
+        so the (chain-loading) stability lookup stays lazy. When the cap is
+        negative and no ``stable_getter`` is given, the full discovered list is
+        returned unchanged (the caller cannot distinguish stability, e.g. an
+        already physics-restricted list).
 
     Raises
     ------
@@ -225,8 +237,21 @@ def select_requested(items, *, kind, key=None):
             )
         result = [by_key[r] for r in requested]
     else:
-        cap = int(os.environ.get("YAMC_VERIFY_NUMBER_OF_SIMULATIONS", "0")) or None
-        result = items[:cap] if cap else items
+        raw_cap = os.environ.get("YAMC_VERIFY_NUMBER_OF_SIMULATIONS", "0").strip()
+        try:
+            cap = int(raw_cap) if raw_cap else 0
+        except ValueError:
+            cap = 0
+        if cap < 0:
+            if stable_getter is not None:
+                stable_keys = set(stable_getter())
+                result = [it for it in items if key(it) in stable_keys]
+            else:
+                result = list(items)
+        elif cap > 0:
+            result = items[:cap]
+        else:
+            result = list(items)
 
     _p = _progress()
     if _p:

@@ -59,7 +59,10 @@ def discover_neutron_nuclides(nuclear_data_dir: str, library: str, run_openmc: b
             )
     # Skip metastable nuclides for transport.
     nuclides = [n for n in nuclides if "_" not in n]
-    return select_requested(nuclides, kind="nuclide")
+    return select_requested(
+        nuclides, kind="nuclide",
+        stable_getter=lambda: stable_nuclide_names(library, run_openmc),
+    )
 
 
 def element_from_nuclide(nuclide: str) -> str:
@@ -84,7 +87,13 @@ def discover_photon_elements(nuclear_data_dir: str, library: str, run_openmc: bo
             supported.append(e)
         except Exception:
             pass
-    return select_requested(supported, kind="element")
+    # For stable-only mode an element is kept if it has at least one stable
+    # isotope (i.e. some stable nuclide reduces to its symbol).
+    return select_requested(
+        supported, kind="element",
+        stable_getter=lambda: {element_from_nuclide(n)
+                               for n in stable_nuclide_names(library, run_openmc)},
+    )
 
 
 def discover_coupled_nuclides(nuclear_data_dir: str, library: str, run_openmc: bool) -> list[tuple]:
@@ -114,7 +123,10 @@ def discover_coupled_nuclides(nuclear_data_dir: str, library: str, run_openmc: b
             raise FileNotFoundError(
                 f"No yamc Arrow cache found for library {library!r}."
             )
-    return select_requested(nuclides, kind="nuclide", key=lambda t: t[0])
+    return select_requested(
+        nuclides, kind="nuclide", key=lambda t: t[0],
+        stable_getter=lambda: stable_nuclide_names(library, run_openmc),
+    )
 
 
 # ---- transmutation-chain-backed discovery (decay-photon, transmutation) ----
@@ -197,6 +209,35 @@ def discover_d1s_nuclides(nuclear_data_dir: str, library: str, chain_file: str,
     return select_requested(result, kind="nuclide", key=lambda t: t[0])
 
 
+def stable_nuclide_names(library: str, run_openmc: bool, chain_file: str | None = None,
+                         transmutation_data: str | None = None) -> set[str]:
+    """Return the set of stable (non-radioactive) nuclide names for ``library``.
+
+    Stability comes from the depletion chain: OpenMC's chain XML when OpenMC is
+    running (and the file exists), otherwise the yamc transmutation network. A
+    nuclide is stable when it has no half-life; metastable states are excluded.
+
+    This backs the ``YAMC_VERIFY_NUMBER_OF_SIMULATIONS=-1`` (stable-only)
+    discovery mode. It is only evaluated when that mode is active, so the chain
+    load stays off the normal (all-isotope / capped) discovery path.
+    """
+    if chain_file is None:
+        chain_file = resolve_openmc_chain(library)
+    if transmutation_data is None:
+        transmutation_data = transmutation_data_path(library)
+    if run_openmc and os.path.exists(chain_file):
+        import openmc.deplete
+
+        chain = openmc.deplete.Chain.from_xml(chain_file)
+        return {nuc.name for nuc in chain.nuclides
+                if nuc.half_life is None and "_m" not in nuc.name}
+    import yamc
+
+    yamc_chain = yamc.TransmutationChain(transmutation_data)
+    hl = yamc_chain.half_lives
+    return {n for n in yamc_chain.nuclide_names if "_m" not in n and hl.get(n) is None}
+
+
 def discover_stable_nuclides(nuclear_data_dir: str, library: str, chain_file: str,
                              transmutation_data: str, run_openmc: bool,
                              return_paths: bool = False):
@@ -206,12 +247,9 @@ def discover_stable_nuclides(nuclear_data_dir: str, library: str, chain_file: st
     ~1000 fission-yield cross sections). Returns bare names, or ``(name, path)``
     tuples when ``return_paths`` is set (the flux-spectrum notebook's form).
     """
+    stable = stable_nuclide_names(library, run_openmc, chain_file, transmutation_data)
     neutron_dir = os.path.join(nuclear_data_dir, "neutron")
     if run_openmc and os.path.exists(chain_file):
-        import openmc.deplete
-
-        chain = openmc.deplete.Chain.from_xml(chain_file)
-        stable = {nuc.name for nuc in chain.nuclides if nuc.half_life is None}
         names = []
         for f in sorted(glob.glob(os.path.join(neutron_dir, "*.h5"))):
             name = os.path.splitext(os.path.basename(f))[0]
@@ -221,11 +259,6 @@ def discover_stable_nuclides(nuclear_data_dir: str, library: str, chain_file: st
         if not names:
             raise FileNotFoundError(f"No stable nuclides found in chain from {neutron_dir}")
     else:
-        import yamc
-
-        yamc_chain = yamc.TransmutationChain(transmutation_data)
-        hl = yamc_chain.half_lives
-        stable = {n for n in yamc_chain.nuclide_names if "_m" not in n and hl.get(n) is None}
         names = []
         for name in _arrow_cache_nuclides(library):
             if "_m" in name or name not in stable:

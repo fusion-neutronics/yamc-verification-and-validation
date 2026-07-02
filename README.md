@@ -43,7 +43,12 @@ finishes. Environment variables control it:
 - `YAMC_VERIFY_ELEMENTS` - comma-separated list naming the exact element(s) to run on
   the photon models, e.g. `Fe`. Overrides the count cap.
 - `YAMC_VERIFY_NUMBER_OF_SIMULATIONS` - cap on nuclides/elements per model when no
-  explicit list is given (default: `3`).
+  explicit list is given (default: `3`). Special values:
+  - `0` - no cap: run **every** discovered nuclide/element (includes radioactive ones).
+  - `-1` - run every **stable** (non-radioactive) nuclide, and for the photon
+    (element) models every element that has a stable isotope. Stability comes from
+    the depletion chain. The already physics-restricted models (decay-photon D1S
+    parents, transmutation stable seeds) are unaffected.
 
 Examples:
 
@@ -56,6 +61,18 @@ MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
 
 # yamc + OpenMC, 10 nuclides/elements per model
 YAMC_VERIFY_NUMBER_OF_SIMULATIONS=10 MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
+
+# EVERYTHING: every stable isotope/element, every model, on all three codes
+# (OpenMC CPU + YAMC CPU + YAMC GPU). `=-1` keeps only stable, non-radioactive
+# nuclides (and elements with a stable isotope); no notebook argument means all
+# endf-b8.1 models. This is the full verification sweep - expect it to take a
+# long time and rely heavily on the cache.
+YAMC_VERIFY_NUMBER_OF_SIMULATIONS=-1 \
+  MC_BACKENDS=openmc-cpu,yamc-cpu,yamc-gpu ./run_models.sh
+
+# Same, but every isotope including radioactive ones (`=0` removes the cap).
+YAMC_VERIFY_NUMBER_OF_SIMULATIONS=0 \
+  MC_BACKENDS=openmc-cpu,yamc-cpu,yamc-gpu ./run_models.sh
 
 # one specific isotope/element through every model on all three codes
 YAMC_VERIFY_NUCLIDES=Fe56 YAMC_VERIFY_ELEMENTS=Fe \

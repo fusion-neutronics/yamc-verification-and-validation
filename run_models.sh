@@ -12,7 +12,8 @@
 #   ./run_models.sh tasks/neutron/sphere/endf-b8.1.ipynb   # specific notebook(s)
 #
 # Env vars (read by the notebooks / orchestrator):
-#   YAMC_VERIFY_NUMBER_OF_SIMULATIONS  cap on nuclides/elements per notebook (default 3)
+#   YAMC_VERIFY_NUMBER_OF_SIMULATIONS  cap on nuclides/elements per notebook (default 3;
+#                                      0 = every isotope, -1 = every stable isotope)
 #   MC_BACKENDS                        comma list of openmc-cpu,yamc-cpu,yamc-gpu (default openmc-cpu)
 #   YAMC_VERIFY_NUCLIDES / YAMC_VERIFY_ELEMENTS  explicit item list (overrides the cap)
 #
