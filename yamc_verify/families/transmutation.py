@@ -176,8 +176,11 @@ def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain, transmutation_d
     ``Model.simulate_transmutation(method="coupled", ...)``, which re-runs
     transport at every irradiation step and feeds the flux-weighted reaction
     rates into the burnup ODE. Cooling steps (rate 0) become ``Cooldown`` entries
-    that decay only. The chain is reduced via ``reduce_chain_level`` to match
-    OpenMC's ``chain.reduce(...)``.
+    that decay only. ``reduce_transport_chain=reduce_level`` bounds how deep
+    product cross sections are loaded for transport; note this is *not* the same
+    as OpenMC's ``chain.reduce(...)`` -- YAMC always solves the full decay
+    closure, so it does not truncate decay-fed nuclides the way OpenMC's
+    network prune does at a low level.
 
     Returns dict with reduce_s, deplete_s, time_s and a ``steps`` list of
     ``{nuclide: atom_density}`` dicts (one per timestep, skipping the initial
@@ -218,7 +221,7 @@ def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain, transmutation_d
     # Irradiation pulses (rate in n/s) and cooling steps, matching OpenMC.
     schedule = build_pulse_schedule(timesteps, source_rates, source, rate_scale=1.0)
 
-    # reduce_chain_level is applied internally; time the reduction by measuring
+    # reduce_transport_chain is applied internally; time the reduction by measuring
     # the chain reduce separately for parity with the OpenMC breakdown.
     t0 = time.perf_counter()
     _ = yamc_chain.reduce([nuclide], level=reduce_level)
@@ -231,7 +234,7 @@ def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain, transmutation_d
         transmutation_file=transmutation_data,
         total_particles=task.particles,
         seed=1,
-        reduce_chain_level=reduce_level,
+        reduce_transport_chain=reduce_level,
     )
     deplete_s = time.perf_counter() - t1
 
