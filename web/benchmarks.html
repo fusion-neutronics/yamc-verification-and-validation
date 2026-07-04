@@ -1,0 +1,1616 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YAMC benchmark database</title>
+<style>
+  :root {
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #6e6c66;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --accent: #2a78d6;
+    --hist-bar: #4a3aa7;
+    --q-excellent: #0ca30c;
+    --q-good: #2a78d6;
+    --q-fair: #fab219;
+    --q-poor: #d03b3b;
+    --hover-wash: rgba(11, 11, 11, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --accent: #3987e5;
+      --hist-bar: #9085e9;
+      --q-good: #3987e5;
+      --hover-wash: rgba(255, 255, 255, 0.06);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+
+  header.page h1 { font-size: 24px; font-weight: 650; margin: 0 0 4px; }
+  header.page p { margin: 0; color: var(--ink-2); }
+  header.page a { color: var(--accent); text-decoration: none; }
+  header.page a:hover { text-decoration: underline; }
+
+  /* ---- expected-differences callout ---- */
+  .callout {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); border-radius: 8px;
+    margin: 16px 0 4px; padding: 0 14px;
+  }
+  .callout > summary {
+    cursor: pointer; padding: 11px 0; font-size: 13.5px; font-weight: 600;
+    color: var(--ink); list-style: none;
+  }
+  .callout > summary::-webkit-details-marker { display: none; }
+  .callout > summary::before { content: "▸ "; color: var(--muted); }
+  .callout[open] > summary::before { content: "▾ "; }
+  .callout .body { padding: 0 0 12px; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+  .callout .body h4 { margin: 10px 0 3px; font-size: 12.5px; color: var(--ink); }
+  .callout .body p { margin: 0 0 8px; }
+  .callout .body code {
+    background: var(--page); border: 1px solid var(--border); border-radius: 4px;
+    padding: 0 4px; font-size: 12px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+
+  /* ---- filter row ---- */
+  .filters {
+    display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px;
+    margin: 18px 0 14px;
+  }
+  .filters .field { display: flex; flex-direction: column; gap: 3px; }
+  .filters label { font-size: 11.5px; color: var(--muted); }
+  .filters select {
+    font: inherit; color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--baseline); border-radius: 7px;
+    padding: 5px 8px; min-width: 130px; max-width: 210px;
+  }
+  .filters .check {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--ink-2); padding-bottom: 6px; cursor: pointer;
+  }
+  .filters .check input { accent-color: var(--accent); width: 15px; height: 15px; }
+  .filters button {
+    font: inherit; color: var(--ink-2);
+    background: none; border: 1px solid var(--baseline); border-radius: 7px;
+    padding: 5px 12px; cursor: pointer; margin-bottom: 1px;
+  }
+  .filters button:hover { background: var(--hover-wash); }
+  .count-chip {
+    margin-left: auto; padding-bottom: 5px;
+    font-size: 15px; color: var(--ink-2); white-space: nowrap;
+  }
+  .count-chip strong { color: var(--ink); font-weight: 650; font-size: 17px; }
+
+  /* ---- stat tiles ---- */
+  .tiles {
+    display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    margin-bottom: 10px;
+  }
+  .tile .label { font-size: 12px; color: var(--muted); }
+  .tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
+  .tile .note { font-size: 11.5px; color: var(--ink-2); margin-top: 2px; }
+
+  /* ---- chart cards ---- */
+  .charts { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; margin-bottom: 10px; }
+  @media (max-width: 800px) { .charts { grid-template-columns: 1fr; } }
+  .chart-title { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+  .chart-sub { font-size: 11.5px; color: var(--muted); margin: 0 0 12px; }
+
+  .qbar { display: flex; height: 22px; border-radius: 5px; overflow: hidden; background: var(--grid); }
+  .qbar .seg { min-width: 0; }
+  .qbar .seg + .seg { border-left: 2px solid var(--surface); }
+  .qlegend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; }
+  .qlegend .key { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+  .qlegend .key .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .qlegend .key strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .hist { display: flex; align-items: flex-end; gap: 8px; height: 110px; margin-top: 4px; }
+  .hist .slot {
+    flex: 1; display: flex; align-items: flex-end; justify-content: center;
+    height: 100%; cursor: default; border-radius: 4px 4px 0 0;
+  }
+  .hist .slot:hover, .hist .slot:focus-visible { background: var(--hover-wash); outline: none; }
+  .hist .bar {
+    width: 100%; max-width: 24px;
+    background: var(--hist-bar);
+    border-radius: 4px 4px 0 0;
+  }
+  .hist-axis { display: flex; gap: 8px; border-top: 1px solid var(--baseline); margin-top: 0; padding-top: 4px; }
+  .hist-axis span {
+    flex: 1; text-align: center; font-size: 10.5px; color: var(--muted);
+    white-space: nowrap;
+  }
+  @media (max-width: 620px) {
+    .hist-axis span:nth-child(even) { visibility: hidden; }
+  }
+  .tooltip {
+    position: fixed; z-index: 10; pointer-events: none;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+    padding: 6px 9px; font-size: 12px; color: var(--ink-2);
+    display: none; max-width: 260px;
+  }
+  .tooltip strong { color: var(--ink); font-size: 13px; }
+
+  /* ---- results table ---- */
+  .table-card { padding: 0; overflow: hidden; }
+  .table-scroll { overflow: auto; max-height: 72vh; }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; }
+  caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--surface);
+    /* box-shadow, not border: collapsed borders don't travel with sticky cells */
+    box-shadow: 0 1px 0 var(--baseline);
+    padding: 9px 12px; text-align: left;
+    font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap;
+  }
+  thead th button {
+    all: unset; cursor: pointer; font: inherit; color: inherit;
+  }
+  thead th button:hover, thead th button:focus-visible { color: var(--ink); }
+  thead th button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  thead th .arrow { font-size: 10px; }
+  tbody td {
+    padding: 7px 12px; border-bottom: 1px solid var(--grid);
+    vertical-align: top; white-space: nowrap;
+  }
+  tbody tr.expandable { cursor: pointer; }
+  tbody tr.expandable:hover { background: var(--hover-wash); }
+  tbody tr.expanded { background: var(--hover-wash); }
+  .expander {
+    all: unset; cursor: pointer; color: var(--muted);
+    font-size: 10px; padding: 2px 4px;
+  }
+  .expander:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  tr.detail-row > td { padding: 0; white-space: normal; }
+
+  /* ---- benchmark detail panel ---- */
+  .detail { padding: 14px 16px 18px; background: var(--page); }
+  .detail .perf { font-size: 12.5px; color: var(--ink-2); margin: 0 0 8px; }
+  .detail .cmp-badges { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 12px; font-size: 12.5px; }
+  /* geometry and spectra each on their own full-width row */
+  .detail-grid { display: flex; flex-direction: column; gap: 12px; }
+  .detail-grid .spectra-col { display: flex; flex-direction: column; gap: 12px; }
+  .detail .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .detail h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+  .detail .note { color: var(--muted); font-size: 11.5px; margin: 6px 0 0; }
+  .model-frame { width: 100%; height: 500px; border: 0; border-radius: 6px; background: #1a1a2e; }
+  .plot-div { width: 100%; }
+  .tally-wrap { overflow-x: auto; margin-top: 12px; }
+  table.tally { border-collapse: collapse; width: 100%; }
+  table.tally th, table.tally td {
+    padding: 5px 10px; font-size: 12px; text-align: left;
+    border-bottom: 1px solid var(--grid); white-space: nowrap;
+  }
+  table.tally th { color: var(--muted); font-weight: 600; position: static; box-shadow: none; }
+  table.tally td.val { font-variant-numeric: tabular-nums; }
+  .step-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .step-btns button {
+    font: inherit; font-size: 12px; color: var(--ink-2);
+    background: none; border: 1px solid var(--baseline); border-radius: 999px;
+    padding: 3px 11px; cursor: pointer;
+  }
+  .step-btns button[aria-pressed="true"] {
+    color: var(--ink); border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .detail .error { color: var(--q-poor); font-size: 12.5px; }
+  .dl-btn {
+    font: inherit; font-size: 12.5px; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--baseline); border-radius: 7px;
+    padding: 5px 12px; margin: 0 0 12px; cursor: pointer;
+  }
+  .dl-btn:hover { color: var(--ink); border-color: var(--accent); }
+  .dl-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .dim { color: var(--muted); }
+  .item-cell { font-weight: 600; }
+  .chip {
+    display: inline-block; padding: 1px 7px; margin-right: 4px;
+    font-size: 11px; color: var(--ink-2);
+    border: 1px solid var(--baseline); border-radius: 999px;
+  }
+  .qcell .badge { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+  .qcell .badge .dot { width: 9px; height: 9px; border-radius: 999px; flex: none; }
+  .qcell .metrics { font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
+
+  footer { margin-top: 14px; font-size: 12px; color: var(--muted); }
+  .load-error { margin: 40px 0; }
+  .load-error code { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<main>
+  <header class="page">
+    <h1>Benchmark database</h1>
+    <p>Every cached verification simulation, filterable by what it models, with
+       YAMC-vs-OpenMC agreement wherever a paired result exists.
+       <a href="./">&#8592; Verification book</a></p>
+  </header>
+
+  <details class="callout">
+    <summary>Expected differences between YAMC and OpenMC</summary>
+    <div class="body">
+      <p>Some benchmarks show a difference that is <em>expected</em>: it comes from a
+         methodological choice, not from either code being wrong. Read these before
+         treating a disagreement as an error.</p>
+
+      <h4>Depletion chain reduction (transmutation benchmarks)</h4>
+      <p>YAMC and OpenMC interpret the depletion "reduce" level differently, so
+         low-density nuclides can differ. YAMC's <code>reduce_transport_chain</code>
+         bounds <em>only</em> which product nuclides get cross sections loaded for
+         neutron transport; the burnup (Bateman) equations are always solved on the
+         <em>full</em> decay network. That solve is cheap (sparse CRAM) and exact, so
+         nothing is saved by trimming it and no accuracy is lost by keeping it.
+         OpenMC's <code>Chain.reduce</code> instead prunes the <em>whole</em> network
+         (transport, decay, and the Bateman matrix together), so at a low level it drops
+         decay-fed nuclides entirely.</p>
+      <p>The consequence is analytic, not a coincidence: any nuclide that appears in
+         YAMC's result but lies <em>outside</em> OpenMC's reduced chain is one OpenMC
+         cannot produce by construction. Where the codes disagree on such a
+         low-density, decay-fed nuclide, <strong>YAMC is the more complete result and
+         OpenMC has truncated a real decay pathway</strong>. It is not YAMC being
+         wrong. The dominant, physically significant nuclides agree closely; the
+         disagreements sit orders of magnitude below them.</p>
+
+      <h4>Shutdown dose rate / decay photons (D1S benchmarks)</h4>
+      <p>For decay-gamma and shutdown-dose-rate benchmarks, YAMC's D1S (Direct-1-Step)
+         also emits the decay gammas of the <em>decay products</em>: it follows the
+         activation daughters down the chain and includes their decay photons. OpenMC's
+         D1S attributes decay gammas only to the directly activated nuclide and misses
+         the gammas emitted by those subsequent decay products. Expect YAMC to show
+         additional decay-photon flux and lines from the daughter nuclides; that extra
+         signal is real physics OpenMC's D1S omits.</p>
+    </div>
+  </details>
+
+  <div id="app" hidden>
+    <section class="filters" aria-label="Filters">
+      <div class="field">
+        <label for="f-family">Simulation type</label>
+        <select id="f-family"></select>
+      </div>
+      <div class="field">
+        <label for="f-geometry">Geometry</label>
+        <select id="f-geometry"></select>
+      </div>
+      <div class="field">
+        <label for="f-library">Nuclear data library</label>
+        <select id="f-library"></select>
+      </div>
+      <div class="field">
+        <label for="f-element">Element</label>
+        <select id="f-element"></select>
+      </div>
+      <div class="field">
+        <label for="f-item">Nuclide / element</label>
+        <select id="f-item"></select>
+      </div>
+      <label class="check"><input type="checkbox" id="f-compared"> With comparison only</label>
+      <button type="button" id="f-reset">Reset</button>
+      <div class="count-chip" aria-live="polite"><strong id="count-n">0</strong> <span id="count-rest"></span></div>
+    </section>
+
+    <section class="tiles" id="tiles" aria-label="Headline statistics"></section>
+
+    <section class="charts">
+      <div class="card">
+        <h2 class="chart-title">Agreement quality</h2>
+        <p class="chart-sub">Paired comparisons in the current selection, by agreement band
+          (reduced-&chi;&sup2; for spectra, max rel. diff for transmutation)</p>
+        <div class="qbar" id="qbar" role="img"></div>
+        <div class="qlegend" id="qlegend"></div>
+      </div>
+      <div class="card">
+        <h2 class="chart-title">Deviation distribution</h2>
+        <p class="chart-sub" id="hist-sub">Relative difference per comparison (%)</p>
+        <div class="hist" id="hist"></div>
+        <div class="hist-axis" id="hist-axis"></div>
+      </div>
+    </section>
+
+    <section class="card table-card">
+      <div class="table-scroll">
+        <table id="results">
+          <caption>Benchmark results, filtered</caption>
+          <thead><tr id="head-row"></tr></thead>
+          <tbody id="body"></tbody>
+        </table>
+        <div class="empty" id="empty" hidden>No benchmarks match these filters.</div>
+      </div>
+    </section>
+
+    <footer id="foot"></footer>
+  </div>
+
+  <div class="load-error" id="load-error" hidden></div>
+  <div class="tooltip" id="tooltip"></div>
+</main>
+
+<script>
+"use strict";
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ---------- constants ---------- */
+
+  var FAMILY_LABEL = {
+    "neutron": "Neutron",
+    "photon": "Photon",
+    "secondary-photon": "Secondary photon",
+    "decay-photon": "Decay photon",
+    "transmutation-reaction-rate": "Transmutation reaction rate",
+    "transmutation-flux-spectrum": "Transmutation flux spectrum"
+  };
+  var CODE_LABEL = {
+    "openmc": "OpenMC CPU",
+    "yamc-cpu": "YAMC CPU",
+    "yamc-gpu": "YAMC GPU",
+    "yamc": "YAMC CPU"
+  };
+  var QUALITIES = ["Excellent", "Good", "Fair", "Poor"];
+  var QCOLOR = {
+    "Excellent": "var(--q-excellent)",
+    "Good": "var(--q-good)",
+    "Fair": "var(--q-fair)",
+    "Poor": "var(--q-poor)"
+  };
+  var HIST_EDGES = [0, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, Infinity];
+  var FILTER_FIELDS = ["family", "geometry", "library", "element", "item"];
+  var FIELD_LABEL = function (field, value) {
+    return field === "family" ? (FAMILY_LABEL[value] || value) : value;
+  };
+
+  /* ---------- state ---------- */
+
+  var index = null;
+  var filters = { family: "", geometry: "", library: "", element: "", item: "" };
+  var comparedOnly = false;
+  /* default: worst agreement first, so paired rows lead and the eye lands on data */
+  var DEFAULT_SORT = { key: "cmp-cpu", dir: -1 };
+  var sort = { key: DEFAULT_SORT.key, dir: DEFAULT_SORT.dir };
+
+  /* ---------- small helpers ---------- */
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = text;
+    return e;
+  }
+  function fmtInt(n) {
+    if (n >= 10000) {
+      var v = n >= 1e6 ? n / 1e6 : n / 1e3;
+      return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + (n >= 1e6 ? "M" : "K");
+    }
+    return n.toLocaleString("en-US");
+  }
+  function fmtPct(v) {
+    if (v === null || v === undefined || !isFinite(v)) return "n/a";
+    if (v >= 100) return v.toFixed(0) + "%";
+    return (v >= 10 ? v.toFixed(1) : v.toFixed(2)) + "%";
+  }
+  function fmtChi2(v) {
+    if (v === null || v === undefined || !isFinite(v)) return "n/a";
+    return v >= 100 ? v.toFixed(0) : v.toFixed(2);
+  }
+  function quantile(sorted, q) {
+    if (!sorted.length) return null;
+    var pos = (sorted.length - 1) * q;
+    var lo = Math.floor(pos), hi = Math.ceil(pos);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  }
+  function num(v) { return (typeof v === "number" && isFinite(v)) ? v : null; }
+
+  /* nuclides sort by (element, mass number): Mo92 before Mo100 */
+  var NAT_RE = /^([A-Za-z]+)(\d+)?$/;
+  function natCompare(a, b) {
+    var ma = NAT_RE.exec(a), mb = NAT_RE.exec(b);
+    if (!ma || !mb) return a < b ? -1 : a > b ? 1 : 0;
+    if (ma[1] !== mb[1]) return ma[1] < mb[1] ? -1 : 1;
+    return (ma[2] ? parseInt(ma[2], 10) : -1) - (mb[2] ? parseInt(mb[2], 10) : -1);
+  }
+
+  /* the deviation metric depends on the comparison kind; captions must say which */
+  function deviationLabel(pairs) {
+    var spectrum = false, transmutation = false;
+    pairs.forEach(function (p) {
+      if (p.cmp.kind === "transmutation") transmutation = true;
+      else spectrum = true;
+    });
+    if (spectrum && transmutation) return "flux-weighted (spectra) + rms (transmutation)";
+    if (transmutation) return "rms over nuclide densities";
+    return "flux-weighted";
+  }
+
+  /* ---------- filtering ---------- */
+
+  function matches(rec, skipField) {
+    for (var i = 0; i < FILTER_FIELDS.length; i++) {
+      var f = FILTER_FIELDS[i];
+      if (f === skipField) continue;
+      if (filters[f] && rec[f] !== filters[f]) return false;
+    }
+    if (comparedOnly && skipField !== "compared" && rec.comparisons.length === 0) return false;
+    return true;
+  }
+  function filtered() {
+    return index.benchmarks.filter(function (r) { return matches(r, null); });
+  }
+  function comparisons(recs) {
+    var out = [];
+    recs.forEach(function (r) {
+      r.comparisons.forEach(function (c) { out.push({ rec: r, cmp: c }); });
+    });
+    return out;
+  }
+
+  /* severity: quality band first, then chi2, then worst rel diff (mirrors the index builder) */
+  function severity(c) {
+    var q = QUALITIES.indexOf(c.quality);
+    var chi2 = num(c.reduced_chi_squared) || 0;
+    var rd = num(c.max_tally_rel_diff_pct);
+    if (rd === null) rd = num(c.max_rel_diff_pct) || 0;
+    return (q + 1) * 1e12 + Math.min(chi2, 1e5) * 1e6 + Math.min(rd, 1e5);
+  }
+  function rowSeverity(rec, code) {
+    var c = cmpFor(rec, code);
+    return c ? severity(c) : -1;
+  }
+  function cmpFor(rec, code) {
+    for (var i = 0; i < rec.comparisons.length; i++) {
+      if (rec.comparisons[i].code === code) return rec.comparisons[i];
+    }
+    return null;
+  }
+
+  /* ---------- filter dropdowns ---------- */
+
+  function rebuildSelect(field) {
+    var sel = $("f-" + field);
+    var counts = {};
+    index.benchmarks.forEach(function (r) {
+      if (matches(r, field)) counts[r[field]] = (counts[r[field]] || 0) + 1;
+    });
+    var values = Object.keys(counts).sort(natCompare);
+    if (filters[field] && values.indexOf(filters[field]) < 0) values.push(filters[field]);
+
+    sel.textContent = "";
+    var all = el("option", null, "All (" + values.reduce(function (s, v) { return s + (counts[v] || 0); }, 0) + ")");
+    all.value = "";
+    sel.appendChild(all);
+    values.forEach(function (v) {
+      var o = el("option", null, FIELD_LABEL(field, v) + " (" + (counts[v] || 0) + ")");
+      o.value = v;
+      sel.appendChild(o);
+    });
+    sel.value = filters[field];
+  }
+
+  /* ---------- stat tiles ---------- */
+
+  function tile(label, value, note) {
+    var t = el("div", "card tile");
+    t.appendChild(el("div", "label", label));
+    t.appendChild(el("div", "value", value));
+    if (note) t.appendChild(el("div", "note", note));
+    return t;
+  }
+
+  function renderTiles(recs, pairs) {
+    var box = $("tiles");
+    box.textContent = "";
+    var sims = 0, floats = 0;
+    recs.forEach(function (r) { sims += r.codes.length; });
+    pairs.forEach(function (p) { floats += p.cmp.floats_compared || 0; });
+
+    var devs = pairs.map(function (p) { return num(p.cmp.weighted_avg_rel_diff_pct); })
+                    .filter(function (v) { return v !== null; })
+                    .sort(function (a, b) { return a - b; });
+    var median = quantile(devs, 0.5), p90 = quantile(devs, 0.9), max = devs.length ? devs[devs.length - 1] : null;
+
+    box.appendChild(tile("Simulations", fmtInt(sims), "one cached run of one code"));
+    box.appendChild(tile("Benchmarks", fmtInt(recs.length), "type × geometry × library × item"));
+    box.appendChild(tile("Paired comparisons", fmtInt(pairs.length), "OpenMC + YAMC both cached"));
+    box.appendChild(tile("Floats compared", fmtInt(floats), "spectrum bins, tallies, densities"));
+    box.appendChild(tile("Median deviation", median === null ? "n/a" : fmtPct(median),
+      median === null ? "no comparisons in selection"
+                      : deviationLabel(pairs) + " · p90 " + fmtPct(p90) + " · max " + fmtPct(max)));
+  }
+
+  /* ---------- quality stacked bar ---------- */
+
+  function renderQuality(pairs) {
+    var counts = { Excellent: 0, Good: 0, Fair: 0, Poor: 0 };
+    pairs.forEach(function (p) {
+      if (counts[p.cmp.quality] !== undefined) counts[p.cmp.quality]++;
+    });
+    var total = QUALITIES.reduce(function (s, q) { return s + counts[q]; }, 0);
+
+    var bar = $("qbar");
+    bar.textContent = "";
+    bar.setAttribute("aria-label", QUALITIES.map(function (q) { return counts[q] + " " + q; }).join(", "));
+    if (total > 0) {
+      QUALITIES.forEach(function (q) {
+        if (!counts[q]) return;
+        var seg = el("div", "seg");
+        seg.style.width = (100 * counts[q] / total) + "%";
+        seg.style.background = QCOLOR[q];
+        attachTip(seg, function () { return { strong: counts[q] + " " + q.toLowerCase(), rest: fmtPct(100 * counts[q] / total) + " of comparisons" }; });
+        bar.appendChild(seg);
+      });
+    }
+
+    var legend = $("qlegend");
+    legend.textContent = "";
+    QUALITIES.forEach(function (q) {
+      var key = el("span", "key");
+      var dot = el("span", "dot");
+      dot.style.background = QCOLOR[q];
+      key.appendChild(dot);
+      key.appendChild(el("span", null, q + " "));
+      key.appendChild(el("strong", null, String(counts[q])));
+      legend.appendChild(key);
+    });
+  }
+
+  /* ---------- deviation histogram ---------- */
+
+  function binLabel(i) {
+    var lo = HIST_EDGES[i], hi = HIST_EDGES[i + 1];
+    if (hi === Infinity) return "≥" + lo;
+    if (i === 0) return "<" + hi;
+    return lo + "–" + hi;
+  }
+
+  function renderHist(pairs) {
+    var bins = [];
+    for (var i = 0; i < HIST_EDGES.length - 1; i++) bins.push(0);
+    var n = 0;
+    pairs.forEach(function (p) {
+      var v = num(p.cmp.weighted_avg_rel_diff_pct);
+      if (v === null) return;
+      n++;
+      for (var i = 0; i < bins.length; i++) {
+        if (v < HIST_EDGES[i + 1] || i === bins.length - 1) { bins[i]++; break; }
+      }
+    });
+    var peak = Math.max.apply(null, bins.concat([1]));
+
+    var hist = $("hist");
+    hist.textContent = "";
+    var axis = $("hist-axis");
+    axis.textContent = "";
+    bins.forEach(function (count, i) {
+      var slot = el("div", "slot");
+      slot.tabIndex = 0;
+      slot.setAttribute("role", "img");
+      slot.setAttribute("aria-label",
+        count + (count === 1 ? " comparison" : " comparisons") + " with relative difference " + binLabel(i) + " percent");
+      var bar = el("div", "bar");
+      bar.style.height = count ? Math.max(3, Math.round(100 * count / peak)) + "%" : "0";
+      slot.appendChild(bar);
+      attachTip(slot, function () {
+        return { strong: count + (count === 1 ? " comparison" : " comparisons"),
+                 rest: "rel. diff " + binLabel(i) + "%" };
+      });
+      hist.appendChild(slot);
+      axis.appendChild(el("span", null, binLabel(i)));
+    });
+    $("hist-sub").textContent = "Relative difference per comparison (%), " +
+      deviationLabel(pairs) + ", n = " + n;
+  }
+
+  /* ---------- tooltip ---------- */
+
+  function attachTip(target, content) {
+    function show(x, y) {
+      var t = $("tooltip");
+      t.textContent = "";
+      var c = content();
+      t.appendChild(el("strong", null, c.strong));
+      t.appendChild(document.createElement("br"));
+      t.appendChild(document.createTextNode(c.rest));
+      t.style.display = "block";
+      var pad = 12;
+      var w = t.offsetWidth, h = t.offsetHeight;
+      var left = Math.min(x + pad, window.innerWidth - w - 8);
+      var top = y - h - pad;
+      if (top < 8) top = y + pad;
+      t.style.left = left + "px";
+      t.style.top = top + "px";
+    }
+    function hide() { $("tooltip").style.display = "none"; }
+    target.addEventListener("pointermove", function (ev) { show(ev.clientX, ev.clientY); });
+    target.addEventListener("pointerleave", hide);
+    target.addEventListener("focus", function () {
+      var r = target.getBoundingClientRect();
+      show(r.left + r.width / 2, r.top);
+    });
+    target.addEventListener("blur", hide);
+  }
+
+  /* ---------- results table ---------- */
+
+  var COLUMNS = [
+    { key: "expand", label: "", sortable: false, render: function (td, r) {
+        var b = el("button", "expander", "▸");
+        b.type = "button";
+        b.setAttribute("aria-expanded", "false");
+        b.setAttribute("aria-label", "Show details for " + r.item + " " +
+                       (FAMILY_LABEL[r.family] || r.family) + " " + r.geometry);
+        td.appendChild(b);
+      } },
+    { key: "family", label: "Simulation type", sortable: true,
+      value: function (r) { return FAMILY_LABEL[r.family] || r.family; } },
+    { key: "geometry", label: "Geometry", sortable: true,
+      value: function (r) { return r.geometry; } },
+    { key: "library", label: "Library", sortable: true,
+      value: function (r) { return r.library; } },
+    { key: "item", label: "Item", sortable: true, cls: "item-cell",
+      value: function (r) { return r.item; } },
+    { key: "codes", label: "Cached results", sortable: false, render: renderCodesCell },
+    { key: "cmp-cpu", label: "YAMC CPU vs OpenMC", sortable: true, render: cmpCellRenderer("yamc-cpu") },
+    { key: "cmp-gpu", label: "YAMC GPU vs OpenMC", sortable: true, render: cmpCellRenderer("yamc-gpu") }
+  ];
+
+  function renderCodesCell(td, r) {
+    r.codes.forEach(function (c) {
+      td.appendChild(el("span", "chip", CODE_LABEL[c] || c));
+    });
+  }
+
+  function cmpCellRenderer(code) {
+    return function (td, r) {
+      td.className = "qcell";
+      var c = cmpFor(r, code);
+      if (!c) {
+        td.appendChild(el("span", "dim", "n/a"));
+        return;
+      }
+      var badge = el("span", "badge");
+      var dot = el("span", "dot");
+      dot.style.background = QCOLOR[c.quality] || "var(--baseline)";
+      badge.appendChild(dot);
+      badge.appendChild(el("span", null, c.quality || "n/a"));
+      td.appendChild(badge);
+      var m;
+      if (c.kind === "transmutation") {
+        m = "rms " + fmtPct(c.weighted_avg_rel_diff_pct) + " · max " + fmtPct(c.max_rel_diff_pct);
+      } else {
+        m = "χ² " + fmtChi2(c.reduced_chi_squared) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
+      }
+      td.appendChild(document.createElement("br"));
+      td.appendChild(el("span", "metrics", m));
+    };
+  }
+
+  function sortValue(rec, key) {
+    if (key === "cmp-cpu") return rowSeverity(rec, "yamc-cpu");
+    if (key === "cmp-gpu") return rowSeverity(rec, "yamc-gpu");
+    return rec[key];
+  }
+
+  function sortRecords(recs) {
+    var key = sort.key, dir = sort.dir;
+    return recs.slice().sort(function (a, b) {
+      var d;
+      if (key === "item") {
+        d = natCompare(a.item, b.item);
+      } else {
+        var va = sortValue(a, key), vb = sortValue(b, key);
+        d = va < vb ? -1 : va > vb ? 1 : 0;
+      }
+      if (d !== 0) return d * dir;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+  }
+
+  function renderHead() {
+    var row = $("head-row");
+    row.textContent = "";
+    COLUMNS.forEach(function (col) {
+      var th = el("th", col.sortable ? "sortable" : null);
+      th.scope = "col";
+      if (col.sortable) {
+        var btn = el("button", null, col.label);
+        btn.type = "button";
+        btn.appendChild(el("span", "arrow",
+          sort.key === col.key ? (sort.dir === 1 ? " ▲" : " ▼") : ""));
+        th.setAttribute("aria-sort",
+          sort.key === col.key ? (sort.dir === 1 ? "ascending" : "descending") : "none");
+        btn.addEventListener("click", function () {
+          if (sort.key === col.key) {
+            sort.dir = -sort.dir;
+          } else {
+            sort.key = col.key;
+            /* comparison columns: first click shows worst first */
+            sort.dir = (col.key === "cmp-cpu" || col.key === "cmp-gpu") ? -1 : 1;
+          }
+          render();
+        });
+        th.appendChild(btn);
+      } else {
+        th.appendChild(document.createTextNode(col.label));
+      }
+      row.appendChild(th);
+    });
+  }
+
+  function renderTable(recs) {
+    var body = $("body");
+    body.textContent = "";
+    var frag = document.createDocumentFragment();
+    sortRecords(recs).forEach(function (r) {
+      var tr = document.createElement("tr");
+      tr.className = "expandable";
+      COLUMNS.forEach(function (col) {
+        var td = document.createElement("td");
+        if (col.cls) td.className = col.cls;
+        if (col.render) col.render(td, r);
+        else td.textContent = col.value(r);
+        tr.appendChild(td);
+      });
+      tr.addEventListener("click", function (ev) {
+        if (ev.target.closest("a")) return;
+        toggleDetail(r, tr);
+      });
+      frag.appendChild(tr);
+    });
+    body.appendChild(frag);
+    $("empty").hidden = recs.length > 0;
+  }
+
+  /* ---------- benchmark detail: cached-result fetch layer ---------- */
+
+  /* MT number -> reaction name (yamc.data.reaction_names()); injected at build */
+  var REACTION_NAMES = {"1":"(n,total)","2":"(n,elastic)","3":"(n,nonelastic)","4":"(n,level)","5":"(n,misc)","11":"(n,2nd)","16":"(n,2n)","17":"(n,3n)","18":"(n,fission)","19":"(n,f)","20":"(n,nf)","21":"(n,2nf)","22":"(n,na)","23":"(n,n3a)","24":"(n,2na)","25":"(n,3na)","27":"(n,absorption)","28":"(n,np)","29":"(n,n2a)","30":"(n,2n2a)","32":"(n,nd)","33":"(n,nt)","34":"(n,n3He)","35":"(n,nd2a)","36":"(n,nt2a)","37":"(n,4n)","38":"(n,3nf)","41":"(n,2np)","42":"(n,3np)","44":"(n,n2p)","45":"(n,npa)","51":"(n,n1)","52":"(n,n2)","53":"(n,n3)","54":"(n,n4)","55":"(n,n5)","56":"(n,n6)","57":"(n,n7)","58":"(n,n8)","59":"(n,n9)","60":"(n,n10)","61":"(n,n11)","62":"(n,n12)","63":"(n,n13)","64":"(n,n14)","65":"(n,n15)","66":"(n,n16)","67":"(n,n17)","68":"(n,n18)","69":"(n,n19)","70":"(n,n20)","71":"(n,n21)","72":"(n,n22)","73":"(n,n23)","74":"(n,n24)","75":"(n,n25)","76":"(n,n26)","77":"(n,n27)","78":"(n,n28)","79":"(n,n29)","80":"(n,n30)","81":"(n,n31)","82":"(n,n32)","83":"(n,n33)","84":"(n,n34)","85":"(n,n35)","86":"(n,n36)","87":"(n,n37)","88":"(n,n38)","89":"(n,n39)","90":"(n,n40)","91":"(n,nc)","101":"(n,disappear)","102":"(n,gamma)","103":"(n,p)","104":"(n,d)","105":"(n,t)","106":"(n,3He)","107":"(n,a)","108":"(n,2a)","109":"(n,3a)","111":"(n,2p)","112":"(n,pa)","113":"(n,t2a)","114":"(n,d2a)","115":"(n,pd)","116":"(n,pt)","117":"(n,da)","152":"(n,5n)","153":"(n,6n)","154":"(n,2nt)","155":"(n,ta)","156":"(n,4np)","157":"(n,3nd)","158":"(n,nda)","159":"(n,2npa)","160":"(n,7n)","161":"(n,8n)","162":"(n,5np)","163":"(n,6np)","164":"(n,7np)","165":"(n,4na)","166":"(n,5na)","167":"(n,6na)","168":"(n,7na)","169":"(n,4nd)","170":"(n,5nd)","171":"(n,6nd)","172":"(n,3nt)","173":"(n,4nt)","174":"(n,5nt)","175":"(n,6nt)","176":"(n,2n3He)","177":"(n,3n3He)","178":"(n,4n3He)","179":"(n,3n2p)","180":"(n,3n2a)","181":"(n,3npa)","182":"(n,dt)","183":"(n,npd)","184":"(n,npt)","185":"(n,ndt)","186":"(n,np3He)","187":"(n,nd3He)","188":"(n,nt3He)","189":"(n,nta)","190":"(n,2n2p)","191":"(n,p3He)","192":"(n,d3He)","193":"(n,3Hea)","194":"(n,4n2p)","195":"(n,4n2a)","196":"(n,4npa)","197":"(n,3p)","198":"(n,n3p)","199":"(n,3n2pa)","200":"(n,5n2p)","203":"(n,Xp)","204":"(n,Xd)","205":"(n,Xt)","206":"(n,X3He)","207":"(n,Xa)","301":"heating","444":"damage-energy","600":"(n,p0)","601":"(n,p1)","602":"(n,p2)","603":"(n,p3)","604":"(n,p4)","605":"(n,p5)","606":"(n,p6)","607":"(n,p7)","608":"(n,p8)","609":"(n,p9)","610":"(n,p10)","611":"(n,p11)","612":"(n,p12)","613":"(n,p13)","614":"(n,p14)","615":"(n,p15)","616":"(n,p16)","617":"(n,p17)","618":"(n,p18)","619":"(n,p19)","620":"(n,p20)","621":"(n,p21)","622":"(n,p22)","623":"(n,p23)","624":"(n,p24)","625":"(n,p25)","626":"(n,p26)","627":"(n,p27)","628":"(n,p28)","629":"(n,p29)","630":"(n,p30)","631":"(n,p31)","632":"(n,p32)","633":"(n,p33)","634":"(n,p34)","635":"(n,p35)","636":"(n,p36)","637":"(n,p37)","638":"(n,p38)","639":"(n,p39)","640":"(n,p40)","641":"(n,p41)","642":"(n,p42)","643":"(n,p43)","644":"(n,p44)","645":"(n,p45)","646":"(n,p46)","647":"(n,p47)","648":"(n,p48)","649":"(n,pc)","650":"(n,d0)","651":"(n,d1)","652":"(n,d2)","653":"(n,d3)","654":"(n,d4)","655":"(n,d5)","656":"(n,d6)","657":"(n,d7)","658":"(n,d8)","659":"(n,d9)","660":"(n,d10)","661":"(n,d11)","662":"(n,d12)","663":"(n,d13)","664":"(n,d14)","665":"(n,d15)","666":"(n,d16)","667":"(n,d17)","668":"(n,d18)","669":"(n,d19)","670":"(n,d20)","671":"(n,d21)","672":"(n,d22)","673":"(n,d23)","674":"(n,d24)","675":"(n,d25)","676":"(n,d26)","677":"(n,d27)","678":"(n,d28)","679":"(n,d29)","680":"(n,d30)","681":"(n,d31)","682":"(n,d32)","683":"(n,d33)","684":"(n,d34)","685":"(n,d35)","686":"(n,d36)","687":"(n,d37)","688":"(n,d38)","689":"(n,d39)","690":"(n,d40)","691":"(n,d41)","692":"(n,d42)","693":"(n,d43)","694":"(n,d44)","695":"(n,d45)","696":"(n,d46)","697":"(n,d47)","698":"(n,d48)","699":"(n,dc)","700":"(n,t0)","701":"(n,t1)","702":"(n,t2)","703":"(n,t3)","704":"(n,t4)","705":"(n,t5)","706":"(n,t6)","707":"(n,t7)","708":"(n,t8)","709":"(n,t9)","710":"(n,t10)","711":"(n,t11)","712":"(n,t12)","713":"(n,t13)","714":"(n,t14)","715":"(n,t15)","716":"(n,t16)","717":"(n,t17)","718":"(n,t18)","719":"(n,t19)","720":"(n,t20)","721":"(n,t21)","722":"(n,t22)","723":"(n,t23)","724":"(n,t24)","725":"(n,t25)","726":"(n,t26)","727":"(n,t27)","728":"(n,t28)","729":"(n,t29)","730":"(n,t30)","731":"(n,t31)","732":"(n,t32)","733":"(n,t33)","734":"(n,t34)","735":"(n,t35)","736":"(n,t36)","737":"(n,t37)","738":"(n,t38)","739":"(n,t39)","740":"(n,t40)","741":"(n,t41)","742":"(n,t42)","743":"(n,t43)","744":"(n,t44)","745":"(n,t45)","746":"(n,t46)","747":"(n,t47)","748":"(n,t48)","749":"(n,tc)","750":"(n,3He0)","751":"(n,3He1)","752":"(n,3He2)","753":"(n,3He3)","754":"(n,3He4)","755":"(n,3He5)","756":"(n,3He6)","757":"(n,3He7)","758":"(n,3He8)","759":"(n,3He9)","760":"(n,3He10)","761":"(n,3He11)","762":"(n,3He12)","763":"(n,3He13)","764":"(n,3He14)","765":"(n,3He15)","766":"(n,3He16)","767":"(n,3He17)","768":"(n,3He18)","769":"(n,3He19)","770":"(n,3He20)","771":"(n,3He21)","772":"(n,3He22)","773":"(n,3He23)","774":"(n,3He24)","775":"(n,3He25)","776":"(n,3He26)","777":"(n,3He27)","778":"(n,3He28)","779":"(n,3He29)","780":"(n,3He30)","781":"(n,3He31)","782":"(n,3He32)","783":"(n,3He33)","784":"(n,3He34)","785":"(n,3He35)","786":"(n,3He36)","787":"(n,3He37)","788":"(n,3He38)","789":"(n,3He39)","790":"(n,3He40)","791":"(n,3He41)","792":"(n,3He42)","793":"(n,3He43)","794":"(n,3He44)","795":"(n,3He45)","796":"(n,3He46)","797":"(n,3He47)","798":"(n,3He48)","799":"(n,3Hec)","800":"(n,a0)","801":"(n,a1)","802":"(n,a2)","803":"(n,a3)","804":"(n,a4)","805":"(n,a5)","806":"(n,a6)","807":"(n,a7)","808":"(n,a8)","809":"(n,a9)","810":"(n,a10)","811":"(n,a11)","812":"(n,a12)","813":"(n,a13)","814":"(n,a14)","815":"(n,a15)","816":"(n,a16)","817":"(n,a17)","818":"(n,a18)","819":"(n,a19)","820":"(n,a20)","821":"(n,a21)","822":"(n,a22)","823":"(n,a23)","824":"(n,a24)","825":"(n,a25)","826":"(n,a26)","827":"(n,a27)","828":"(n,a28)","829":"(n,a29)","830":"(n,a30)","831":"(n,a31)","832":"(n,a32)","833":"(n,a33)","834":"(n,a34)","835":"(n,a35)","836":"(n,a36)","837":"(n,a37)","838":"(n,a38)","839":"(n,a39)","840":"(n,a40)","841":"(n,a41)","842":"(n,a42)","843":"(n,a43)","844":"(n,a44)","845":"(n,a45)","846":"(n,a46)","847":"(n,a47)","848":"(n,a48)","849":"(n,ac)","875":"(n,2n0)","876":"(n,2n1)","877":"(n,2n2)","878":"(n,2n3)","879":"(n,2n4)","880":"(n,2n5)","881":"(n,2n6)","882":"(n,2n7)","883":"(n,2n8)","884":"(n,2n9)","885":"(n,2n10)","886":"(n,2n11)","887":"(n,2n12)","888":"(n,2n13)","889":"(n,2n14)","890":"(n,2n15)","891":"(n,2nc)","901":"heating-local"};
+
+  var PLOTLY_SRC = "https://cdn.plot.ly/plotly-2.35.2.min.js";
+  var plotlyPromise = null;
+  function ensurePlotly() {
+    if (window.Plotly) return Promise.resolve();
+    if (!plotlyPromise) {
+      plotlyPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement("script");
+        s.src = PLOTLY_SRC;
+        s.onload = resolve;
+        s.onerror = function () {
+          plotlyPromise = null;
+          reject(new Error("could not load plotly.js from " + PLOTLY_SRC));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    return plotlyPromise;
+  }
+
+  function decodeNp(o) {
+    if (o && typeof o === "object") {
+      if (o._np_array !== undefined) return o._np_array;
+      if (Array.isArray(o)) return o.map(decodeNp);
+      var out = {};
+      for (var k in o) out[k] = decodeNp(o[k]);
+      return out;
+    }
+    return o;
+  }
+
+  var cacheStore = {};
+  function fetchCache(path) {
+    if (!cacheStore[path]) {
+      cacheStore[path] = fetch(path)
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status + " for " + path);
+          return r.json();
+        })
+        .then(function (d) { return { meta: d._meta || {}, results: decodeNp(d.results || {}) }; });
+      cacheStore[path].catch(function () { delete cacheStore[path]; });
+    }
+    return cacheStore[path];
+  }
+
+  /* ---------- benchmark detail: plot + table builders ---------- */
+
+  /* notebook conventions: yamc_verify.plotting.BACKEND_STYLES / RATIO_COLORS */
+  var PLOT_STYLES = {
+    "OpenMC CPU": { color: "blue", dash: null },
+    "YAMC CPU": { color: "red", dash: "dash" },
+    "YAMC GPU": { color: "orange", dash: "dot" }
+  };
+  var RATIO_COLORS = {
+    "YAMC CPU / OpenMC CPU": "green",
+    "YAMC GPU / OpenMC CPU": "purple",
+    "YAMC GPU / YAMC CPU": "teal"
+  };
+  var STEP_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#4a3aa7", "#e34948",
+                     "#e87ba4", "#eb6834", "#008300"];
+  var FLUX_DECADES = 6;
+
+  function isDark() {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function plotlyLayout(extra) {
+    var dark = isDark();
+    var base = {
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      font: { color: dark ? "#c3c2b7" : "#52514e", size: 11 },
+      margin: { l: 60, r: 16, t: 34, b: 42 },
+      height: 460
+    };
+    for (var k in extra) base[k] = extra[k];
+    return base;
+  }
+  function axisDefaults() {
+    var dark = isDark();
+    return { gridcolor: dark ? "#2c2c2a" : "#e1e0d9",
+             linecolor: dark ? "#383835" : "#c3c2b7", zeroline: false };
+  }
+
+  function stepXY(bins, values) {
+    var x = [], y = [];
+    for (var i = 0; i < values.length; i++) {
+      x.push(bins[i], bins[i + 1]);
+      y.push(values[i], values[i]);
+    }
+    return { x: x, y: y };
+  }
+
+  /* one spectrum figure: flux/lethargy steps + error markers + ratio-vs-reference */
+  function spectrumFigure(node, title, bins, series, maxEnergy) {
+    var lethargy = [], centers = [];
+    for (var i = 0; i < bins.length - 1; i++) {
+      lethargy.push(Math.log10(bins[i + 1] / bins[i]));
+      centers.push(Math.sqrt(bins[i] * bins[i + 1]));
+    }
+    var perLeth = series.map(function (s) {
+      return {
+        label: s.label,
+        flux: s.mean.map(function (v, j) { return v / lethargy[j]; }),
+        std: s.std.map(function (v, j) { return v / lethargy[j]; })
+      };
+    });
+    var maxFlux = 0;
+    perLeth.forEach(function (s) {
+      s.flux.forEach(function (v) { if (v > maxFlux) maxFlux = v; });
+    });
+    var threshold = maxFlux / Math.pow(10, FLUX_DECADES);
+    var firstBin = bins.length - 2;
+    perLeth.forEach(function (s) {
+      for (var j = 0; j < s.flux.length; j++) {
+        if (s.flux[j] > 0) { if (j < firstBin) firstBin = j; break; }
+      }
+    });
+    var minE = bins[Math.max(firstBin, 0)];
+    var maxE = maxEnergy || bins[bins.length - 1];
+
+    var ref = null;
+    perLeth.forEach(function (s) { if (s.label === "OpenMC CPU") ref = s; });
+    if (!ref && perLeth.length >= 2) ref = perLeth[0];
+    var ratios = ref ? perLeth.filter(function (s) { return s !== ref; }) : [];
+    var showRatio = ratios.length > 0;
+
+    var traces = [];
+    perLeth.forEach(function (s) {
+      var masked = s.flux.map(function (v) { return v >= threshold ? v : null; });
+      var maskedStd = s.std.map(function (v, j) { return s.flux[j] >= threshold ? v : null; });
+      var style = PLOT_STYLES[s.label] || { color: "gray", dash: null };
+      var xy = stepXY(bins, masked);
+      traces.push({ x: xy.x, y: xy.y, mode: "lines", name: s.label,
+                    line: { color: style.color, width: 2, dash: style.dash || undefined } });
+      traces.push({ x: centers, y: masked, mode: "markers", showlegend: false,
+                    marker: { color: style.color, size: 4 },
+                    error_y: { type: "data", array: maskedStd, visible: true,
+                               color: style.color, thickness: 1 },
+                    hoverinfo: "skip" });
+    });
+    ratios.forEach(function (s) {
+      var r = s.flux.map(function (v, j) {
+        return (v > 0 && ref.flux[j] > 0) ? v / ref.flux[j] : null;
+      });
+      var name = s.label + " / " + ref.label;
+      var xy = stepXY(bins, r);
+      /* ratio traces carry their own legend, anchored over the ratio subplot */
+      traces.push({ x: xy.x, y: xy.y, mode: "lines", name: name, yaxis: "y2",
+                    legend: "legend2",
+                    line: { color: RATIO_COLORS[name] || "green", width: 2 } });
+    });
+
+    var ax = axisDefaults();
+    var layout = plotlyLayout({
+      title: { text: title, font: { size: 13 } },
+      showlegend: true,
+      legend: { x: 0.02, y: 0.98, xanchor: "left", yanchor: "top", bgcolor: "rgba(0,0,0,0)" },
+      xaxis: Object.assign({}, ax, {
+        type: "log", title: { text: "Energy (eV)" }, exponentformat: "e",
+        range: [Math.log10(minE), Math.log10(maxE)]
+      }),
+      yaxis: Object.assign({}, ax, {
+        type: "log", title: { text: "Flux / Lethargy" }, exponentformat: "e",
+        domain: showRatio ? [0.42, 1] : [0, 1]
+      })
+    });
+    if (showRatio) {
+      layout.yaxis2 = Object.assign({}, ax, {
+        title: { text: "Ratio" }, range: [0.5, 1.5], domain: [0, 0.3]
+      });
+      /* second legend sits at the top of the ratio panel */
+      layout.legend2 = { x: 0.02, y: 0.30, xanchor: "left", yanchor: "top", bgcolor: "rgba(0,0,0,0)" };
+      layout.shapes = [{ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2",
+                         y0: 1, y1: 1, line: { color: "gray", dash: "dash", width: 1 } }];
+      layout.height = 560;
+    }
+    window.Plotly.newPlot(node, traces, layout, { responsive: true, displaylogo: false });
+  }
+
+  /* multi-timestep decay-photon spectra: one trace per step, flux per unit
+     lethargy with the notebook's max/10^FLUX_DECADES display threshold */
+  function decaySpectrumFigure(node, title, bins, loaded) {
+    var lethargy = [];
+    for (var i = 0; i < bins.length - 1; i++) lethargy.push(Math.log10(bins[i + 1] / bins[i]));
+
+    var perStep = [];
+    Object.keys(loaded).sort().forEach(function (code) {
+      var res = loaded[code].results;
+      var meta = loaded[code].meta;
+      var timesteps = meta.d1s_timesteps || [];
+      var rates = meta.d1s_source_rates || [];
+      var elapsed = 0;
+      (res.spectra || []).forEach(function (mean, i) {
+        elapsed += timesteps[i] || 0;
+        var phase = (rates[i] || 0) > 0 ? "irrad" : "cool";
+        var name = "Step " + (i + 1) + " (" + phase + ", t=" + fmtDuration(elapsed) + ")";
+        if (Object.keys(loaded).length > 1) name = CODE_LABEL[code] + " " + name;
+        perStep.push({ code: code, step: i, name: name,
+                       flux: mean.map(function (v, j) { return v / lethargy[j]; }) });
+      });
+    });
+
+    var maxFlux = 0, firstBin = bins.length - 2;
+    perStep.forEach(function (s) {
+      for (var j = 0; j < s.flux.length; j++) {
+        if (s.flux[j] > 0) {
+          if (j < firstBin) firstBin = j;
+          if (s.flux[j] > maxFlux) maxFlux = s.flux[j];
+        }
+      }
+    });
+    var threshold = maxFlux / Math.pow(10, FLUX_DECADES);
+
+    var traces = perStep.map(function (s) {
+      var masked = s.flux.map(function (v) { return v >= threshold ? v : null; });
+      var xy = stepXY(bins, masked);
+      return { x: xy.x, y: xy.y, mode: "lines", name: s.name,
+               line: { color: STEP_COLORS[s.step % STEP_COLORS.length], width: 2,
+                       dash: s.code === "openmc" ? undefined : "dash" } };
+    });
+    var ax = axisDefaults();
+    window.Plotly.newPlot(node, traces, plotlyLayout({
+      title: { text: title, font: { size: 13 } },
+      showlegend: true,
+      legend: { x: 0.02, y: 0.02, xanchor: "left", yanchor: "bottom", bgcolor: "rgba(0,0,0,0)" },
+      xaxis: Object.assign({}, ax, {
+        type: "log", title: { text: "Energy (eV)" }, exponentformat: "e",
+        range: [Math.log10(bins[Math.max(firstBin, 0)]), Math.log10(bins[bins.length - 1] * 1.1)]
+      }),
+      yaxis: Object.assign({}, ax, {
+        type: "log", title: { text: "Flux / Lethargy" }, exponentformat: "e"
+      })
+    }), { responsive: true, displaylogo: false });
+  }
+
+  function fmtDuration(seconds) {
+    if (seconds >= 86400) return (seconds / 86400).toFixed(0) + "d";
+    if (seconds >= 3600) return (seconds / 3600).toFixed(0) + "h";
+    return seconds.toFixed(0) + "s";
+  }
+  function fmtExp(v) {
+    return (typeof v === "number" && isFinite(v)) ? v.toExponential(4) : "N/A";
+  }
+  function fmtTally(v, s) {
+    if (typeof v !== "number" || !isFinite(v)) return "N/A";
+    return v.toExponential(4) + " ± " + ((typeof s === "number" && isFinite(s)) ? s.toExponential(2) : "?");
+  }
+  function relDiffText(v, ref) {
+    if (typeof v !== "number" || typeof ref !== "number" ||
+        !isFinite(v) || !isFinite(ref) || ref === 0) return "N/A";
+    return ((v - ref) / ref * 100).toFixed(2) + "%";
+  }
+  /* notebook convention (compare_transmutation_steps): unsigned |y-o|/max(|y|,|o|),
+     with a product missing from one code counted as density 0 */
+  function transmuteRelDiff(v, ref) {
+    var y = (typeof v === "number" && isFinite(v)) ? v : 0;
+    var o = (typeof ref === "number" && isFinite(ref)) ? ref : 0;
+    var denom = Math.max(Math.abs(y), Math.abs(o));
+    if (denom === 0) return "0.00%";
+    return (Math.abs(y - o) / denom * 100).toFixed(2) + "%";
+  }
+
+  function domTable(headers, rows, labelCols) {
+    if (labelCols === undefined) labelCols = 2;
+    var wrap = el("div", "tally-wrap");
+    var table = el("table", "tally");
+    var thead = document.createElement("thead");
+    var hr = document.createElement("tr");
+    headers.forEach(function (h) {
+      var th = el("th", null, h);
+      th.scope = "col";
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    rows.forEach(function (cells) {
+      var tr = document.createElement("tr");
+      cells.forEach(function (c, i) {
+        tr.appendChild(el("td", i >= labelCols ? "val" : null, c));
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  /* score name -> MT, mirroring neutron.py _score_to_mt (reaction_names reversed
+     plus the special OpenMC score aliases) */
+  var SCORE_TO_MT = null;
+  function scoreToMt(name) {
+    if (!SCORE_TO_MT) {
+      SCORE_TO_MT = {};
+      Object.keys(REACTION_NAMES).forEach(function (mt) { SCORE_TO_MT[REACTION_NAMES[mt]] = mt; });
+      var extra = { "total": "1", "elastic": "2", "absorption": "27", "fission": "18",
+                    "heating": "301", "heating-local": "901", "H1-production": "203",
+                    "H2-production": "204", "H3-production": "205", "He3-production": "206",
+                    "He4-production": "207" };
+      Object.keys(extra).forEach(function (k) { SCORE_TO_MT[k] = extra[k]; });
+    }
+    return SCORE_TO_MT[name] || null;
+  }
+
+  /* reaction-rate table: MT | Reaction | one column per code | rel diff vs reference.
+     Score aliases of the same MT merge into one row (notebook _best_value: prefer
+     the first nonzero value among the aliases). */
+  function tallyTable(loaded, meansKey, stdsKey) {
+    var codes = Object.keys(loaded).sort().filter(function (c) {
+      return loaded[c].results[meansKey];
+    });
+    if (!codes.length) return null;
+    var refCode = codes.indexOf("openmc") >= 0 ? "openmc" : codes[0];
+    var diffCodes = codes.filter(function (c) { return c !== refCode; });
+
+    var groups = {};
+    codes.forEach(function (c) {
+      Object.keys(loaded[c].results[meansKey]).forEach(function (key) {
+        var mt = /^\d+$/.test(key) ? key : scoreToMt(key);
+        var gid = mt !== null ? "mt:" + mt : "score:" + key;
+        if (!groups[gid]) groups[gid] = { mt: mt, keys: {} };
+        groups[gid].keys[key] = true;
+      });
+    });
+
+    function bestValue(code, keyList) {
+      var means = loaded[code].results[meansKey];
+      var stds = loaded[code].results[stdsKey] || {};
+      var val, std;
+      for (var i = 0; i < keyList.length; i++) {
+        var v = means[keyList[i]];
+        if (typeof v === "number" && isFinite(v) && v !== 0) return { v: v, s: stds[keyList[i]] };
+        if (val === undefined && v !== undefined) { val = v; std = stds[keyList[i]]; }
+      }
+      return { v: val, s: std };
+    }
+
+    var rows = [];
+    Object.keys(groups).forEach(function (gid) {
+      var g = groups[gid];
+      var keyList = Object.keys(g.keys);
+      var vals = {}, stds = {};
+      var any = false;
+      codes.forEach(function (c) {
+        var b = bestValue(c, keyList);
+        vals[c] = b.v;
+        stds[c] = b.s;
+        if (typeof b.v === "number" && isFinite(b.v) && b.v !== 0) any = true;
+      });
+      if (!any) return;
+      var named = keyList.filter(function (k) { return !/^\d+$/.test(k); });
+      var reaction = g.mt !== null ? (REACTION_NAMES[g.mt] || named[0] || "MT " + g.mt)
+                                   : keyList[0];
+      var cells = [g.mt !== null ? g.mt : "-", reaction];
+      codes.forEach(function (c) { cells.push(fmtTally(vals[c], stds[c])); });
+      diffCodes.forEach(function (c) { cells.push(relDiffText(vals[c], vals[refCode])); });
+      rows.push({ sort: g.mt !== null ? parseInt(g.mt, 10) : 9999, cells: cells });
+    });
+    if (!rows.length) return null;
+    rows.sort(function (a, b) {
+      return a.sort - b.sort || (a.cells[1] < b.cells[1] ? -1 : 1);
+    });
+    var headers = ["MT", "Reaction"].concat(
+      codes.map(function (c) { return CODE_LABEL[c] || c; }),
+      diffCodes.map(function (c) { return "Rel. diff " + (CODE_LABEL[c] || c) + " (%)"; }));
+    return domTable(headers, rows.map(function (r) { return r.cells; }));
+  }
+
+  /* transmutation: per-timestep nuclide density table with a step selector */
+  var DENSITY_CAP = 30;
+  function transmutationSection(rec, loaded) {
+    var box = el("div", "panel");
+    box.appendChild(el("h3", null, "Nuclide densities by timestep"));
+    var codes = Object.keys(loaded).sort().filter(function (c) { return loaded[c].results.steps; });
+    if (!codes.length) {
+      box.appendChild(el("p", "note", "No depletion steps in the cached results."));
+      return box;
+    }
+    var refCode = codes.indexOf("openmc") >= 0 ? "openmc" : codes[0];
+    var meta = loaded[refCode].meta;
+    var timesteps = meta.timesteps || [];
+    /* flux-spectrum caches store the schedule per code, not as source_rates */
+    var rates = meta.source_rates || meta.openmc_source_rates || meta.yamc_source_rates || [];
+    var nSteps = loaded[refCode].results.steps.length;
+
+    var btns = el("div", "step-btns");
+    var tableHolder = el("div");
+    var current = nSteps - 1;
+
+    function renderStep(idx) {
+      current = idx;
+      Array.prototype.forEach.call(btns.children, function (b, i) {
+        b.setAttribute("aria-pressed", String(i === idx));
+      });
+      tableHolder.textContent = "";
+      var products = {};
+      codes.forEach(function (c) {
+        var step = (loaded[c].results.steps || [])[idx] || {};
+        Object.keys(step).forEach(function (p) {
+          products[p] = Math.max(products[p] || 0, Math.abs(step[p]));
+        });
+      });
+      /* notebook DENSITY_THRESHOLD: drop products below 1e-15 in every code */
+      var names = Object.keys(products).filter(function (p) {
+        return products[p] >= 1e-15;
+      }).sort(function (a, b) { return products[b] - products[a]; });
+      var shown = names.slice(0, DENSITY_CAP);
+      var rows = shown.map(function (p) {
+        var vals = {};
+        codes.forEach(function (c) {
+          vals[c] = ((loaded[c].results.steps || [])[idx] || {})[p];
+        });
+        var out = [p];
+        codes.forEach(function (c) { out.push(fmtExp(vals[c])); });
+        codes.filter(function (c) { return c !== refCode; }).forEach(function (c) {
+          out.push(transmuteRelDiff(vals[c], vals[refCode]));
+        });
+        return out;
+      });
+      var headers = ["Nuclide"].concat(
+        codes.map(function (c) { return (CODE_LABEL[c] || c) + " (atoms/b·cm)"; }),
+        codes.filter(function (c) { return c !== refCode; })
+             .map(function (c) { return "Rel. diff " + (CODE_LABEL[c] || c) + " (%)"; }));
+      tableHolder.appendChild(domTable(headers, rows, 1));
+      if (names.length > shown.length) {
+        tableHolder.appendChild(el("p", "note",
+          "Showing the " + shown.length + " highest-density nuclides of " + names.length + "."));
+      }
+    }
+
+    var elapsed = 0;
+    for (var i = 0; i < nSteps; i++) {
+      elapsed += timesteps[i] || 0;
+      var phase = (rates[i] || 0) > 0 ? "irrad" : "cool";
+      var b = el("button", null, "Step " + (i + 1) + " · " + phase + " · t=" + fmtDuration(elapsed));
+      b.type = "button";
+      (function (idx) {
+        b.addEventListener("click", function () { renderStep(idx); });
+      })(i);
+      btns.appendChild(b);
+    }
+    box.appendChild(btns);
+    box.appendChild(tableHolder);
+    renderStep(current);
+    return box;
+  }
+
+  /* ---------- benchmark detail: assembly ---------- */
+
+  function modelFile(rec) {
+    if (rec.family === "transmutation-flux-spectrum") return null;
+    if (rec.family === "transmutation-reaction-rate") return "models/sphere-5.html";
+    if (rec.geometry === "sphere") return "models/sphere-35.html";
+    if (rec.geometry === "broomstick") return "models/broomstick.html";
+    return null;
+  }
+
+  function spectrumSpecs(rec, loaded) {
+    /* group cached spectra by kind across codes: [{title, bins, series:[{label,mean,std}]}] */
+    var specs = [];
+    function collect(title, binsKey, meanKey, stdKey, capToSource) {
+      var bins = null, series = [];
+      Object.keys(loaded).sort().forEach(function (code) {
+        var r = loaded[code].results;
+        if (!r[meanKey]) return;
+        if (!bins) bins = r[binsKey];
+        if (r[meanKey].length === bins.length - 1) {
+          series.push({ label: CODE_LABEL[code] || code, mean: r[meanKey], std: r[stdKey] || [] });
+        }
+      });
+      if (bins && series.length) {
+        specs.push({ title: title, bins: bins, series: series, capToSource: capToSource });
+      }
+    }
+    collect("Flux spectra comparison", "energy_bins", "flux_spectra_mean", "flux_spectra_std_dev", true);
+    /* secondary-photon notebook caps at bins[-1]*1.1, not the neutron source energy
+       (capture gammas extend above it) */
+    collect("Neutron spectrum", "n_energy_bins", "n_spectrum_mean", "n_spectrum_std", false);
+    collect("Photon spectrum", "p_energy_bins", "p_spectrum_mean", "p_spectrum_std", false);
+    return specs;
+  }
+
+  function sourceEnergy(loaded) {
+    var e = null;
+    Object.keys(loaded).forEach(function (c) {
+      if (loaded[c].meta.source_energy) e = loaded[c].meta.source_energy;
+    });
+    return e ? e * 1.1 : null;
+  }
+
+  /* the family key maps to the yamc_verify.families submodule name */
+  function familyModule(family) {
+    if (family === "secondary-photon") return "secondary_photon";
+    if (family === "decay-photon") return "decay_photon";
+    if (family.indexOf("transmutation") === 0) return "transmutation";
+    return family;  /* neutron, photon */
+  }
+
+  /* a self-contained Python script that re-runs this one benchmark through the
+     same yamc_verify code path the verification uses */
+  function reproScript(rec) {
+    var mod = familyModule(rec.family);
+    var mcBackends = rec.codes.map(function (c) {
+      return c === "openmc" ? "openmc-cpu" : c;
+    }).join(",");
+    var envVar = rec.item_kind === "element" ? "YAMC_VERIFY_ELEMENTS" : "YAMC_VERIFY_NUCLIDES";
+    return [
+      '"""Reproduce the ' + (FAMILY_LABEL[rec.family] || rec.family) + " " + rec.geometry,
+      "benchmark for " + rec.item + " (" + rec.library + "), comparing YAMC against OpenMC.",
+      "",
+      "Generated by the YAMC verification benchmark database. Run from the root of a",
+      "yamc-verification checkout, in its environment (see the repo README for setup).",
+      "It drives the exact code path the verification uses, restricted to this one",
+      rec.item_kind + ". Results are cached under the task dir, so a re-run is instant.",
+      '"""',
+      "import os",
+      "import sys",
+      "from pathlib import Path",
+      "",
+      "# find the yamc_verify package (the repo root) walking up from this file,",
+      "# so the script runs from anywhere inside a yamc-verification checkout",
+      "_repo = Path(__file__).resolve().parent",
+      'while _repo != _repo.parent and not (_repo / "yamc_verify").exists():',
+      "    _repo = _repo.parent",
+      "if str(_repo) not in sys.path:",
+      "    sys.path.insert(0, str(_repo))",
+      "os.chdir(_repo)  # cache_dir is repo-relative",
+      "",
+      "# restrict the run to just this benchmark item and the codes it was run with",
+      'os.environ["' + envVar + '"] = "' + rec.item + '"',
+      'os.environ["MC_BACKENDS"] = "' + mcBackends + '"',
+      "",
+      "from yamc_verify import backends, get_task",
+      "from yamc_verify.families import " + mod,
+      "",
+      'TASK = get_task("' + rec.task + '")',
+      "all_results, model = " + mod + ".run_all(",
+      "    TASK, backends.resolve(), cache_dir=TASK.cache_dir",
+      ")",
+      "",
+      "# render the comparison plots + reaction-rate tables (in Jupyter / IPython)",
+      mod + ".display_results(TASK, all_results)",
+      ""
+    ].join("\n");
+  }
+
+  function downloadButton(rec) {
+    var btn = el("button", "dl-btn", "⬇ Download Python script to reproduce this");
+    btn.type = "button";
+    btn.addEventListener("click", function () {
+      var blob = new Blob([reproScript(rec)], { type: "text/x-python" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "reproduce_" + rec.family + "_" + rec.geometry + "_" + rec.item + ".py";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    });
+    return btn;
+  }
+
+  function renderDetail(box, rec) {
+    box.textContent = "";
+    box.appendChild(el("p", "note", "Loading cached results…"));
+
+    var paths = Object.keys(rec.files).sort();
+    Promise.all(paths.map(function (code) {
+      return fetchCache(rec.files[code]).then(
+        function (d) { return { code: code, data: d }; },
+        function (err) { return { code: code, error: err }; });
+    })).then(function (fetched) {
+      box.textContent = "";
+      var loaded = {};
+      var failed = [];
+      fetched.forEach(function (f) {
+        if (f.data) loaded[f.code] = f.data;
+        else failed.push(f.code + " (" + f.error.message + ")");
+      });
+      if (failed.length) {
+        box.appendChild(el("p", "error",
+          "Could not load cached results for: " + failed.join(", ") +
+          ". The results cache may not be published alongside this page."));
+      }
+      if (!Object.keys(loaded).length) return;
+
+      /* performance line */
+      var perf = [];
+      Object.keys(loaded).sort().forEach(function (c) {
+        var r = loaded[c].results;
+        if (typeof r["particles/s"] === "number") {
+          perf.push((CODE_LABEL[c] || c) + ": " + Math.round(r["particles/s"]).toLocaleString("en-US") + " particles/s");
+        } else if (typeof r.time_s === "number") {
+          perf.push((CODE_LABEL[c] || c) + ": " + r.time_s.toFixed(1) + " s depletion");
+        }
+      });
+      if (perf.length) box.appendChild(el("p", "perf", "Performance: " + perf.join("  ·  ")));
+
+      /* agreement badges from the index */
+      if (rec.comparisons.length) {
+        var badges = el("div", "cmp-badges");
+        rec.comparisons.forEach(function (c) {
+          var badge = el("span", "badge");
+          var dot = el("span", "dot");
+          dot.style.background = QCOLOR[c.quality] || "var(--baseline)";
+          badge.appendChild(dot);
+          var m = c.kind === "transmutation"
+            ? "rms " + fmtPct(c.weighted_avg_rel_diff_pct) + " · max " + fmtPct(c.max_rel_diff_pct)
+            : "χ² " + fmtChi2(c.reduced_chi_squared) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
+          badge.appendChild(el("span", null,
+            (CODE_LABEL[c.code] || c.code) + " vs OpenMC: " + (c.quality || "n/a") + " (" + m + ")"));
+          badges.appendChild(badge);
+        });
+        box.appendChild(badges);
+      }
+
+      /* runnable reproducer script */
+      box.appendChild(downloadButton(rec));
+
+      var stack = el("div", "detail-grid");
+      box.appendChild(stack);
+
+      /* spectra (first) */
+      var right = el("div", "spectra-col");
+      stack.appendChild(right);
+      var isDecay = rec.family === "decay-photon";
+      var specs = isDecay ? [] : spectrumSpecs(rec, loaded);
+      var hasDecay = isDecay && Object.keys(loaded).some(function (c) {
+        return (loaded[c].results.spectra || []).length;
+      });
+      if (specs.length || hasDecay) {
+        ensurePlotly().then(function () {
+          specs.forEach(function (spec) {
+            var panel = el("div", "panel");
+            var div = el("div", "plot-div");
+            panel.appendChild(div);
+            right.appendChild(panel);
+            var cap = spec.capToSource ? sourceEnergy(loaded) : null;
+            spectrumFigure(div, spec.title + ": " + rec.item, spec.bins, spec.series,
+                           cap || spec.bins[spec.bins.length - 1] * 1.1);
+          });
+          if (hasDecay) {
+            var panel = el("div", "panel");
+            var div = el("div", "plot-div");
+            panel.appendChild(div);
+            right.appendChild(panel);
+            var binsCode = Object.keys(loaded).sort()[0];
+            decaySpectrumFigure(div, "Decay photon spectra: " + rec.item,
+                                loaded[binsCode].results.energy_bins, loaded);
+          }
+        }).catch(function (err) {
+          right.appendChild(el("p", "error", err.message + " (spectra cannot be plotted)."));
+        });
+      } else if (!rec.family.startsWith("transmutation")) {
+        right.appendChild(el("p", "note", "No spectra in the cached results."));
+      }
+
+      /* reaction-rate / scalar tally tables */
+      [["tallies", "tally_std", "Reaction rates"],
+       ["n_scalars", "n_stds", "Neutron tallies"],
+       ["p_scalars", "p_stds", "Photon tallies"]].forEach(function (spec) {
+        var t = tallyTable(loaded, spec[0], spec[1]);
+        if (t) {
+          var panel = el("div", "panel");
+          panel.appendChild(el("h3", null, spec[2]));
+          panel.appendChild(t);
+          stack.appendChild(panel);
+        }
+      });
+
+      /* transmutation step densities */
+      if (rec.family.startsWith("transmutation")) {
+        stack.appendChild(transmutationSection(rec, loaded));
+      }
+
+      /* model geometry (last, after the spectra and tables) */
+      var geoPanel = el("div", "panel");
+      geoPanel.appendChild(el("h3", null, "Model geometry (interactive)"));
+      var mf = modelFile(rec);
+      if (mf) {
+        var frame = document.createElement("iframe");
+        frame.className = "model-frame";
+        frame.src = mf;
+        frame.loading = "lazy";
+        frame.title = "Interactive geometry viewer (" + rec.geometry + ")";
+        geoPanel.appendChild(frame);
+        geoPanel.appendChild(el("p", "note",
+          "xz slice: the geometry is identical for every " + rec.item_kind + " in this task; " +
+          "only the material composition changes."));
+      } else {
+        geoPanel.appendChild(el("p", "note",
+          "No transport geometry: this task depletes a material against a fixed multigroup flux."));
+      }
+      stack.appendChild(geoPanel);
+    });
+  }
+
+  /* ---------- benchmark detail: expansion mechanics ---------- */
+
+  var openDetail = null;
+  function closeDetail() {
+    if (!openDetail) return;
+    /* responsive plotly plots register window listeners removed only by purge */
+    if (window.Plotly) {
+      Array.prototype.forEach.call(
+        openDetail.detailTr.querySelectorAll(".plot-div"),
+        function (div) { try { window.Plotly.purge(div); } catch (e) { /* not a plot */ } });
+    }
+    openDetail.detailTr.remove();
+    openDetail.tr.classList.remove("expanded");
+    var btn = openDetail.tr.querySelector(".expander");
+    if (btn) {
+      btn.setAttribute("aria-expanded", "false");
+      btn.textContent = "▸";
+    }
+    openDetail = null;
+  }
+  function toggleDetail(rec, tr) {
+    var wasOpen = openDetail && openDetail.id === rec.id;
+    closeDetail();
+    if (wasOpen) return;
+    var dtr = document.createElement("tr");
+    dtr.className = "detail-row";
+    var td = document.createElement("td");
+    td.colSpan = COLUMNS.length;
+    var boxEl = el("div", "detail");
+    td.appendChild(boxEl);
+    dtr.appendChild(td);
+    tr.parentNode.insertBefore(dtr, tr.nextSibling);
+    tr.classList.add("expanded");
+    var btn = tr.querySelector(".expander");
+    if (btn) {
+      btn.setAttribute("aria-expanded", "true");
+      btn.textContent = "▾";
+    }
+    openDetail = { id: rec.id, tr: tr, detailTr: dtr };
+    renderDetail(boxEl, rec);
+  }
+
+  /* ---------- top-level render ---------- */
+
+  function render() {
+    /* re-render replaces tooltip targets, so a resting pointer would strand it */
+    $("tooltip").style.display = "none";
+    closeDetail();
+    FILTER_FIELDS.forEach(rebuildSelect);
+    var recs = filtered();
+    var pairs = comparisons(recs);
+
+    $("count-n").textContent = recs.length.toLocaleString("en-US");
+    $("count-rest").textContent = "of " + index.benchmarks.length.toLocaleString("en-US") + " benchmarks";
+
+    renderTiles(recs, pairs);
+    renderQuality(pairs);
+    renderHist(pairs);
+    renderHead();
+    renderTable(recs);
+  }
+
+  /* ---------- boot ---------- */
+
+  function boot(idx) {
+    index = idx;
+    FILTER_FIELDS.forEach(function (f) {
+      $("f-" + f).addEventListener("change", function (ev) {
+        filters[f] = ev.target.value;
+        render();
+      });
+    });
+    $("f-compared").addEventListener("change", function (ev) {
+      comparedOnly = ev.target.checked;
+      render();
+    });
+    $("f-reset").addEventListener("click", function () {
+      FILTER_FIELDS.forEach(function (f) { filters[f] = ""; });
+      comparedOnly = false;
+      $("f-compared").checked = false;
+      sort = { key: DEFAULT_SORT.key, dir: DEFAULT_SORT.dir };
+      render();
+    });
+
+    var foot = $("foot");
+    var when = idx.generated_unix ? new Date(idx.generated_unix * 1000).toUTCString() : null;
+    var bits = [];
+    if (when) bits.push("Index generated " + when);
+    if (idx.yamc && idx.yamc.yamc_version) {
+      bits.push("yamc " + idx.yamc.yamc_version + (idx.yamc.yamc_commit ? " (" + idx.yamc.yamc_commit + ")" : ""));
+    }
+    bits.push("schema v" + idx.schema_version);
+    foot.textContent = bits.join(" · ");
+
+    $("app").hidden = false;
+    render();
+  }
+
+  fetch("benchmarks-index.json")
+    .then(function (resp) {
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      return resp.json();
+    })
+    .then(boot)
+    .catch(function (err) {
+      var box = $("load-error");
+      box.hidden = false;
+      box.appendChild(el("p", null, "Could not load benchmarks-index.json (" + err.message + ")."));
+      var p = el("p", null, "The index is built by CI next to this page. To preview locally, run ");
+      p.appendChild(el("code", null, "python -m yamc_verify.index_builder --out benchmarks-index.json"));
+      p.appendChild(document.createTextNode(" beside this file and serve the directory over HTTP ("));
+      p.appendChild(el("code", null, "python -m http.server"));
+      p.appendChild(document.createTextNode("); fetch does not work from file://."));
+      box.appendChild(p);
+    });
+})();
+</script>
+</body>
+</html>
