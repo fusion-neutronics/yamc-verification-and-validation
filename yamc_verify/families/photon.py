@@ -201,12 +201,14 @@ def run_yamc_simulation(element: str, task: Task, compute: str = "cpu"):
         geometry=geometry,
         tallies=tallies,
         source=source,
-        total_particles=task.particles * task.batches,
-        seed=1,
         verbose=[],
     )
     t0 = time.perf_counter()
-    sim_results = model.simulate_transport(compute=compute)
+    sim_results = model.simulate_transport(
+        total_particles=task.particles * task.batches,
+        seed=1,
+        compute=compute,
+    )
     elapsed = time.perf_counter() - t0
 
     total = task.particles * task.batches

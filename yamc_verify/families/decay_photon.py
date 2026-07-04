@@ -167,7 +167,7 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
 
     # Unstable activation products reachable from this model's materials.
     radionuclides = mc.Model(
-        geometry=geometry, source=source, total_particles=1, verbose=[],
+        geometry=geometry, source=source, verbose=[],
     ).radionuclides()
 
     tally = mc.Tally(
@@ -185,15 +185,17 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
         geometry=geometry,
         tallies=[tally],
         source=source,
-        total_particles=task.particles * task.batches,
-        seed=1,
         transport_secondary_photons=True,
         use_decay_photons=True,
         verbose=[],
     )
 
     t0 = time.time()
-    dp = model.simulate_transport(compute=compute)[tally]
+    dp = model.simulate_transport(
+        total_particles=task.particles * task.batches,
+        seed=1,
+        compute=compute,
+    )[tally]
     elapsed = time.time() - t0
 
     # Build the irradiation/cooling schedule (Pulse for irrad, Cooldown for cool)

@@ -328,13 +328,15 @@ def run_yamc_simulation(nuclide, neutron_path, element, photon_path, task: Task,
         geometry=geometry,
         tallies=tallies,
         source=source,
-        total_particles=task.particles * task.batches,
-        seed=1,
         transport_secondary_photons=True,
         verbose=[],
     )
     _t0 = time.perf_counter()
-    sim_results = model.simulate_transport(compute=compute)
+    sim_results = model.simulate_transport(
+        total_particles=task.particles * task.batches,
+        seed=1,
+        compute=compute,
+    )
     _elapsed = time.perf_counter() - _t0
 
     # Collect results

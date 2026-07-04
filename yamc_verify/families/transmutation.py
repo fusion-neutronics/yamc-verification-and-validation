@@ -212,7 +212,7 @@ def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain, transmutation_d
         energy=mc.sources.Discrete([task.source_energy], [1.0]),
     )
     model = mc.Model(
-        geometry=geometry, source=source, total_particles=task.particles, seed=1, verbose=[],
+        geometry=geometry, source=source, verbose=[],
     )
 
     # Irradiation pulses (rate in n/s) and cooling steps, matching OpenMC.
@@ -229,6 +229,8 @@ def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain, transmutation_d
         method="coupled",
         schedule=schedule,
         transmutation_file=transmutation_data,
+        total_particles=task.particles,
+        seed=1,
         reduce_chain_level=reduce_level,
     )
     deplete_s = time.perf_counter() - t1
