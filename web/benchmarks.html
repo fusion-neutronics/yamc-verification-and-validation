@@ -333,6 +333,10 @@
         <label for="f-item">Nuclide / element</label>
         <select id="f-item"></select>
       </div>
+      <div class="field" id="field-treatment" hidden>
+        <label for="f-treatment">Electron treatment</label>
+        <select id="f-treatment"></select>
+      </div>
       <label class="check"><input type="checkbox" id="f-compared"> With comparison only</label>
       <button type="button" id="f-reset">Reset</button>
       <div class="count-chip" aria-live="polite"><strong id="count-n">0</strong> <span id="count-rest"></span></div>
@@ -393,7 +397,14 @@
     "openmc": "OpenMC CPU",
     "yamc-cpu": "YAMC CPU",
     "yamc-gpu": "YAMC GPU",
-    "yamc": "YAMC CPU"
+    "yamc": "YAMC CPU",
+    // Electron-treatment-suffixed codes (secondary-photon; see the treatment facet).
+    "openmc-led": "OpenMC CPU (LED)",
+    "openmc-ttb": "OpenMC CPU (TTB)",
+    "yamc-cpu-led": "YAMC CPU (LED)",
+    "yamc-cpu-ttb": "YAMC CPU (TTB)",
+    "yamc-gpu-led": "YAMC GPU (LED)",
+    "yamc-gpu-ttb": "YAMC GPU (TTB)"
   };
   var QUALITIES = ["Excellent", "Good", "Fair", "Poor"];
   var EXPECTED = "Expected differences";
@@ -423,6 +434,11 @@
   var index = null;
   var filters = { family: "", geometry: "", library: "", element: "", item: "" };
   var comparedOnly = false;
+  /* Electron-treatment view for treatment-suffixed codes (secondary-photon):
+     which treatment the OpenMC-vs-YAMC comparison columns/aggregates show.
+     Defaults to "ttb" (both codes' default). Empty when the data has none. */
+  var treatment = "ttb";
+  var TREATMENT_LABEL = { "led": "LED (local deposit)", "ttb": "TTB (bremsstrahlung)" };
   /* default: worst agreement first, so paired rows lead and the eye lands on data */
   var DEFAULT_SORT = { key: "cmp-cpu", dir: -1 };
   var sort = { key: DEFAULT_SORT.key, dir: DEFAULT_SORT.dir };
@@ -494,10 +510,34 @@
   function filtered() {
     return index.benchmarks.filter(function (r) { return matches(r, null); });
   }
+  /* A comparison is shown when it has no treatment (all other families) or its
+     treatment matches the selected one -- so treatment-suffixed secondary-photon
+     comparisons don't double-count and stay consistent with the table. */
+  function treatmentMatches(c) {
+    return !c.treatment || c.treatment === treatment;
+  }
+  /* the electron treatment carried by a (possibly suffixed) code, or "" if none */
+  function codeTreatment(code) {
+    if (/-led$/.test(code)) return "led";
+    if (/-ttb$/.test(code)) return "ttb";
+    return "";
+  }
+  /* keep only codes with no treatment suffix (all other families) or the
+     selected treatment -- used by the detail view so it shows one matched set */
+  function filterLoadedByTreatment(loaded) {
+    var out = {};
+    Object.keys(loaded).forEach(function (c) {
+      var t = codeTreatment(c);
+      if (!t || t === treatment) out[c] = loaded[c];
+    });
+    return out;
+  }
   function comparisons(recs) {
     var out = [];
     recs.forEach(function (r) {
-      r.comparisons.forEach(function (c) { out.push({ rec: r, cmp: c }); });
+      r.comparisons.forEach(function (c) {
+        if (treatmentMatches(c)) out.push({ rec: r, cmp: c });
+      });
     });
     return out;
   }
@@ -518,10 +558,16 @@
     return c ? severity(c) : -1;
   }
   function cmpFor(rec, code) {
+    // Prefer the treatment-suffixed comparison (e.g. yamc-cpu-ttb) for the
+    // selected treatment; fall back to the flat code for families without one.
+    var want = treatment ? code + "-" + treatment : code;
+    var flat = null;
     for (var i = 0; i < rec.comparisons.length; i++) {
-      if (rec.comparisons[i].code === code) return rec.comparisons[i];
+      var c = rec.comparisons[i];
+      if (c.code === want) return c;
+      if (c.code === code) flat = c;
     }
-    return null;
+    return flat;
   }
 
   /* ---------- filter dropdowns ---------- */
@@ -545,6 +591,33 @@
       sel.appendChild(o);
     });
     sel.value = filters[field];
+  }
+
+  /* Electron-treatment facet: shown only when the data carries treatments
+     (secondary-photon). It picks which treatment the comparison columns and
+     aggregates use; there is no "All" option because a comparison column shows
+     one matched (OpenMC vs YAMC) treatment at a time. */
+  function availableTreatments() {
+    var set = {};
+    index.benchmarks.forEach(function (r) {
+      r.comparisons.forEach(function (c) { if (c.treatment) set[c.treatment] = true; });
+    });
+    return Object.keys(set).sort();
+  }
+  function rebuildTreatmentSelect() {
+    var ts = availableTreatments();
+    var field = $("field-treatment");
+    if (!ts.length) { field.hidden = true; return; }
+    field.hidden = false;
+    if (ts.indexOf(treatment) < 0) treatment = ts.indexOf("ttb") >= 0 ? "ttb" : ts[0];
+    var sel = $("f-treatment");
+    sel.textContent = "";
+    ts.forEach(function (t) {
+      var o = el("option", null, TREATMENT_LABEL[t] || t);
+      o.value = t;
+      sel.appendChild(o);
+    });
+    sel.value = treatment;
   }
 
   /* ---------- stat tiles ---------- */
@@ -1430,6 +1503,11 @@
       }
       if (!Object.keys(loaded).length) return;
 
+      // Restrict the detail view to the selected electron treatment's codes
+      // (secondary-photon has treatment-suffixed codes; flat codes always pass).
+      loaded = filterLoadedByTreatment(loaded);
+      if (!Object.keys(loaded).length) return;
+
       /* performance line */
       var perf = [];
       Object.keys(loaded).sort().forEach(function (c) {
@@ -1446,6 +1524,7 @@
       if (rec.comparisons.length) {
         var badges = el("div", "cmp-badges");
         rec.comparisons.forEach(function (c) {
+          if (!treatmentMatches(c)) return;  // show only the selected treatment
           var b = band(c);
           var badge = el("span", "badge");
           var dot = el("span", "dot");
@@ -1610,6 +1689,7 @@
     $("tooltip").style.display = "none";
     closeDetail();
     FILTER_FIELDS.forEach(rebuildSelect);
+    rebuildTreatmentSelect();
     var recs = filtered();
     var pairs = comparisons(recs);
 
@@ -1637,9 +1717,14 @@
       comparedOnly = ev.target.checked;
       render();
     });
+    $("f-treatment").addEventListener("change", function (ev) {
+      treatment = ev.target.value;
+      render();
+    });
     $("f-reset").addEventListener("click", function () {
       FILTER_FIELDS.forEach(function (f) { filters[f] = ""; });
       comparedOnly = false;
+      treatment = "ttb";
       $("f-compared").checked = false;
       sort = { key: DEFAULT_SORT.key, dir: DEFAULT_SORT.dir };
       render();
