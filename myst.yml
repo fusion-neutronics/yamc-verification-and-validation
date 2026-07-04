@@ -1,66 +1,12 @@
 version: 1
 project:
   title: YAMC Verification
+  # The per-family notebooks are now run-and-cache drivers only; the results are
+  # presented by the interactive benchmark database page (web/benchmarks.html,
+  # linked from the intro and shipped by the Pages CI), so they are no longer in
+  # the book and are excluded from the build.
   toc:
     - file: intro.md
-    - title: Neutron
-      children:
-        - title: Sphere
-          children:
-            - file: tasks/neutron/sphere/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
-            # - file: tasks/neutron/sphere/fendl-3.2c.ipynb
-            #   title: FENDL-3.2c
-        - title: Broomstick
-          children:
-            - file: tasks/neutron/broomstick/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
-            # - file: tasks/neutron/broomstick/fendl-3.2c.ipynb
-            #   title: FENDL-3.2c
-    - title: Photon
-      children:
-        - title: Broomstick
-          children:
-            - file: tasks/photon/broomstick/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
-            # - file: tasks/photon/broomstick/fendl-3.2c.ipynb
-            #   title: FENDL-3.2c
-        - title: Sphere
-          children:
-            - file: tasks/photon/sphere/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
-            # - file: tasks/photon/sphere/fendl-3.2c.ipynb
-            #   title: FENDL-3.2c
-    - title: Secondary Photon
-      children:
-        - title: Broomstick
-          children:
-            - file: tasks/secondary-photon/broomstick/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
-        - title: Sphere
-          children:
-            - file: tasks/secondary-photon/sphere/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
-    - title: Decay Photon
-      children:
-        - title: Broomstick
-          children:
-            - file: tasks/decay-photon/broomstick/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
-        - title: Sphere
-          children:
-            - file: tasks/decay-photon/sphere/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
-    - title: Transmutation
-      children:
-        - title: Material + Flux Spectrum
-          children:
-            - file: tasks/transmutation/material-flux-spectrum/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
-        - title: Material + Reaction Rate
-          children:
-            - file: tasks/transmutation/material-reaction-rate/endf-b8.1.ipynb
-              title: ENDF/B-VIII.1
     - file: developer-notes.md
       title: Developer Notes
   error_rules:
@@ -73,11 +19,8 @@ project:
     - run_models.sh
     - LICENSE
     - README.md
-    # FENDL data not yet available; uncomment when added.
-    - tasks/neutron/sphere/fendl-3.2c.ipynb
-    - tasks/photon/broomstick/fendl-3.2c.ipynb
-    - tasks/photon/sphere/fendl-3.2c.ipynb
-    - tasks/neutron/broomstick/fendl-3.2c.ipynb
+    # run-and-cache driver notebooks, presented by the benchmark database page
+    - tasks/**/*.ipynb
 site:
   options:
     logo: logo.png
