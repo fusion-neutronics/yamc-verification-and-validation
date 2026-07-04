@@ -58,8 +58,8 @@ yamc-verification/
 ├── requirements.txt     # Python dependencies
 ├── run_models.sh        # -> python -m yamc_verify.orchestrator (live dashboard)
 ├── cache_utils.py       # JSON results cache + progress-emitting cached_or_run/select_requested
-├── yamc_verify/         # Shared package (thin notebooks import from here)
-│   ├── tasks.py         # Task registry: one Task per notebook (config source of truth)
+├── yamc_verify/         # Shared package (all the model logic)
+│   ├── tasks.py         # Task registry: one Task per model/geometry/library (config source of truth)
 │   ├── backends.py      # MC_BACKENDS parsing
 │   ├── geometry.py      # sphere/broomstick region builders (yamc + openmc)
 │   ├── discovery.py     # nuclide/element discovery per family
@@ -67,8 +67,9 @@ yamc-verification/
 │   ├── progress.py      # progress side-channel (YAMC_VERIFY_PROGRESS)
 │   ├── plan.py          # up-front cached/to-do plan from the cache
 │   ├── dashboard.py     # live in-place terminal dashboard
-│   ├── orchestrator.py  # runs notebooks silently + tails progress
-│   └── families/        # per-physics runners/plots/run+display glue
+│   ├── orchestrator.py  # runs tasks silently + tails progress dashboard
+│   ├── run_task.py      # drives one task's run_all (no notebook)
+│   └── families/        # per-physics runners/plots/run glue
 │       ├── neutron.py
 │       ├── photon.py
 │       ├── secondary_photon.py
@@ -76,9 +77,7 @@ yamc-verification/
 │       └── transmutation.py
 └── tasks/
     └── <physics>/<geometry>/
-        ├── endf-b8.1.ipynb   # thin: task lookup + run_all + display_results
-        ├── fendl-3.2c.ipynb
-        └── cache/            # on-disk JSON results cache
+        └── cache/            # on-disk JSON results cache (the database the web page reads)
 ```
 
 ## Adding a New Nuclear Data Library
@@ -86,37 +85,24 @@ yamc-verification/
 1. Add the library path to `NUCLEAR_DATA_DIR` in `yamc_verify/tasks.py`
 2. Register a `Task` for each model/geometry using the new library (copy an
    existing entry and change `library`/`particles`)
-3. Copy an existing thin notebook and point its `get_task("…")` at the new key
-4. Update the markdown title and add the notebook to `toc` in `myst.yml`
+3. Run it (`./run_models.sh <task-key>`); the index builder and the benchmark
+   database page pick up the new library automatically (library is a facet).
 
 ## Adding a New Model
 
-1. Add a new family module under `yamc_verify/families/` (or reuse one) and
-   register `Task`s for it in `yamc_verify/tasks.py`
-2. Create thin notebooks under `tasks/` that call the family's `run_all` /
-   `display_results`
-3. Add a new section to the `toc` in `myst.yml`:
-
-```yaml
-toc:
-  - file: intro.md
-  - title: Sphere Model
-    children:
-      - file: tasks/sphere/endf-b8.0.ipynb
-      - file: tasks/sphere/fendl-3.2c.ipynb
-  - title: Cylinder Model
-    children:
-      - file: tasks/cylinder/endf-b8.0.ipynb
-      - file: tasks/cylinder/fendl-3.2c.ipynb
-```
+1. Add a new family module under `yamc_verify/families/` (or reuse one),
+   exposing a `run_all(task, backends, cache_dir=...)` like the others.
+2. Register `Task`s for it in `yamc_verify/tasks.py`, and map the new
+   `task.family` to the module in `yamc_verify/run_task.py`.
+3. Run it with `./run_models.sh <task-key>`; results land in the task's cache
+   and appear in the benchmark database page. There are no notebooks to add.
 
 ## Configuration
 
 ### Simulation Parameters
 
-Per-notebook run parameters now live in the task registry
-(`yamc_verify/tasks.py`), one `Task` per notebook, rather than in each
-notebook's setup cell:
+Per-task run parameters live in the task registry (`yamc_verify/tasks.py`), one
+`Task` per model/geometry/library:
 
 | Field | Description |
 |-------|-------------|
@@ -131,57 +117,41 @@ notebook's setup cell:
 `particles`/`batches` are intentionally not exposed via env vars (lowering them
 produces statistical noise that masquerades as YAMC/OpenMC disagreement).
 
-### Notebook Execution
+### Running the models
 
-Notebooks are not executed during the build. Run them in-place before building.
-The recommended path is the orchestrator, which runs them quietly with a live
-progress dashboard (see the README):
-
-```bash
-./run_models.sh                 # all endf-b8.1 notebooks
-./run_models.sh tasks/neutron/sphere/endf-b8.1.ipynb
-```
-
-You can still drive `nbconvert` directly for a single notebook if needed:
+Runs are driven directly by the orchestrator (no notebooks); it runs each task
+via `python -m yamc_verify.run_task` as a subprocess and renders a live progress
+dashboard (see the README):
 
 ```bash
-jupyter nbconvert --to notebook --execute --inplace tasks/*/*/*.ipynb
+./run_models.sh                         # all endf-b8.1 tasks
+./run_models.sh neutron/sphere/endf-b8.1   # a specific task (key or old notebook path)
 ```
 
-To clear all notebook outputs (e.g. before committing):
+To run a single task without the dashboard:
 
 ```bash
-jupyter nbconvert --ClearOutputPreprocessor.enabled=True --to notebook --inplace tasks/*/*/*.ipynb
+python -m yamc_verify.run_task neutron/sphere/endf-b8.1
 ```
 
-#### Git hooks
-
-A pre-commit hook that clears notebook outputs automatically (keeping diffs
-source-only) is tracked in `.githooks/`. Enable it once per clone:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-It strips outputs from `tasks/*/*/*.ipynb` and re-stages them. If `jupyter` is
-not on `PATH` it falls back to `python -m nbconvert`, and if neither is
-available it prints a warning rather than blocking the commit.
+Results are written to the on-disk cache; the benchmark database page
+(`web/benchmarks.html`) reads the cache via the generated `benchmarks-index.json`.
 
 #### Test vs full mode
 
-Each notebook iterates over many nuclides or elements. For a quick smoke test
-without re-running everything, set `YAMC_VERIFY_NUMBER_OF_SIMULATIONS` to clip
-the iteration list to the first N items:
+Each task iterates over many nuclides or elements. For a quick smoke test
+without running everything, set `YAMC_VERIFY_NUMBER_OF_SIMULATIONS` to clip the
+iteration list to the first N items:
 
 ```bash
-# Smoke test: first 5 nuclides only
-YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
+# Smoke test: first 5 items of one task
+YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 ./run_models.sh neutron/sphere/endf-b8.1
 
-# All notebooks, first 5 each
-YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 jupyter nbconvert --to notebook --execute --inplace tasks/*/*/*.ipynb
+# All tasks, first 5 each
+YAMC_VERIFY_NUMBER_OF_SIMULATIONS=5 ./run_models.sh
 
 # Full run (unset or 0)
-jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
+./run_models.sh neutron/sphere/endf-b8.1
 ```
 
 `PARTICLES` and `BATCHES` are intentionally not exposed via env vars. Lowering
@@ -190,20 +160,19 @@ which would defeat the purpose of verification.
 
 #### Selecting which codes/backends to run
 
-By default each notebook runs OpenMC plus YAMC on both CPU and GPU. To pick a
-subset, set the `MC_BACKENDS` env var to a comma-separated list of tokens.
-Valid tokens: `openmc-cpu`, `yamc-cpu`, `yamc-gpu`. Any one, two, or all three
-may be selected.
+By default a task runs OpenMC plus YAMC on both CPU and GPU. To pick a subset,
+set the `MC_BACKENDS` env var to a comma-separated list of tokens. Valid tokens:
+`openmc-cpu`, `yamc-cpu`, `yamc-gpu`. Any one, two, or all three may be selected.
 
 ```bash
 # Compare yamc cpu and yamc gpu only (skip OpenMC)
-MC_BACKENDS=yamc-cpu,yamc-gpu jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
+MC_BACKENDS=yamc-cpu,yamc-gpu ./run_models.sh neutron/sphere/endf-b8.1
 
 # OpenMC vs yamc cpu only (no GPU; useful on CI runners without an f64 Vulkan adapter)
-MC_BACKENDS=openmc-cpu,yamc-cpu jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
+MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh neutron/sphere/endf-b8.1
 
 # Default: all three
-jupyter nbconvert --to notebook --execute --inplace tasks/neutron/sphere/endf-b8.1.ipynb
+./run_models.sh neutron/sphere/endf-b8.1
 ```
 
 When `openmc-cpu` is excluded, the ratio panel and rel-diff columns use the
@@ -213,7 +182,7 @@ first YAMC backend in `MC_BACKENDS` as the reference instead.
 
 Simulation results are cached as JSON under
 `tasks/<model>/<...>/cache/<library>/<code>/<nuclide>.json` (via `cache_utils.py`),
-so re-running a notebook to iterate on plots does not re-run the simulations.
+so re-running a task does not repeat simulations that are already cached.
 Two invalidation policies:
 
 - **OpenMC** results are keyed by the run parameters only (library, particles,
@@ -222,8 +191,8 @@ Two invalidation policies:
 - **YAMC** results are additionally keyed by the **yamc version and git
   commit** (`cache_utils.yamc_fingerprint()`). When you rebuild or update yamc
   (a new release, or a new commit for an editable/source install) the cache
-  auto-invalidates and the affected simulations re-run on the next notebook
-  execution. The version string does not bump per development build, so the git
+  auto-invalidates and the affected simulations re-run on the next run. The
+  version string does not bump per development build, so the git
   commit is what catches day-to-day changes; on a wheel install with no git
   checkout the commit is `null` and invalidation falls back to the version.
 
@@ -235,12 +204,11 @@ rm -rf tasks/*/*/cache
 
 ## Troubleshooting
 
-### Notebook execution fails
+### A task run fails
 
-Check the error in the build output. Common issues:
+Check the per-task log the orchestrator prints on failure. Common issues:
 - Missing nuclear data files, perhaps correct the data path used
 - OpenMC/YAMC not installed in the virtual environment
-- Timeout exceeded (increase in `myst.yml`)
 
 
 ### Cache issues

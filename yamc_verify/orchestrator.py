@@ -1,15 +1,16 @@
-"""Run the verification model notebooks with a live, in-place dashboard.
+"""Run the verification tasks with a live, in-place dashboard.
 
 Replaces the scrolling ``run_models.sh`` output with the indented layout from
-issue #29. Each notebook is executed by ``jupyter nbconvert`` as a subprocess
+issue #29. Each task is run by ``python -m yamc_verify.run_task`` as a subprocess
 with its stdout/stderr captured (so nothing scrolls) and ``YAMC_VERIFY_PROGRESS``
-pointing at a per-notebook side-channel file. The orchestrator tails that file
-and re-renders the dashboard as items complete.
+pointing at a per-task side-channel file. The orchestrator tails that file and
+re-renders the dashboard as items complete.
 
-Usage (mirrors run_models.sh)::
+Usage (mirrors run_models.sh); arguments are task keys or (for backwards
+compatibility) the old notebook paths::
 
-    python -m yamc_verify.orchestrator                       # all endf-b8.1 notebooks
-    python -m yamc_verify.orchestrator tasks/neutron/sphere/endf-b8.1.ipynb ...
+    python -m yamc_verify.orchestrator                       # all endf-b8.1 tasks
+    python -m yamc_verify.orchestrator neutron/sphere/endf-b8.1 ...
 
 Honors the same env vars as before: ``MC_BACKENDS``, ``YAMC_VERIFY_NUCLIDES``,
 ``YAMC_VERIFY_ELEMENTS``, ``YAMC_VERIFY_NUMBER_OF_SIMULATIONS``.
@@ -29,19 +30,23 @@ from . import dashboard, plan, tasks
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _jupyter_cmd():
-    venv = os.path.join(REPO_ROOT, ".venv", "bin", "jupyter")
-    return venv if os.path.exists(venv) else "jupyter"
-
-
 def _select_tasks(argv, run_openmc):
-    """Resolve the notebook arguments to registry tasks (default: all endf-b8.1)."""
+    """Resolve args to registry tasks (default: all endf-b8.1).
+
+    Each arg may be a task key (``neutron/sphere/endf-b8.1``) or, for backwards
+    compatibility, the old notebook path (``tasks/neutron/sphere/endf-b8.1.ipynb``).
+    """
     if argv:
         out = []
-        for nb in argv:
-            t = tasks.task_for_notebook(nb)
+        for arg in argv:
+            try:
+                out.append(tasks.get_task(arg))
+                continue
+            except KeyError:
+                pass
+            t = tasks.task_for_notebook(arg)
             if t is None:
-                print(f"warning: no registered task for {nb}; skipping", file=sys.stderr)
+                print(f"warning: no registered task for {arg}; skipping", file=sys.stderr)
                 continue
             out.append(t)
         return out
@@ -110,7 +115,6 @@ def run(argv=None) -> int:
 
     display.update(state, time.monotonic())
 
-    jupyter = _jupyter_cmd()
     tmpdir = tempfile.mkdtemp(prefix="yamc_verify_progress_")
     failures = []
 
@@ -133,8 +137,7 @@ def run(argv=None) -> int:
         log_path = os.path.join(tmpdir, task.key.replace("/", "_") + ".log")
         log = open(log_path, "w")
         proc = subprocess.Popen(
-            [jupyter, "nbconvert", "--to", "notebook", "--execute", "--inplace",
-             "--ExecutePreprocessor.timeout=-1", task.notebook],
+            [sys.executable, "-m", "yamc_verify.run_task", task.key],
             cwd=REPO_ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
         )
 
@@ -150,18 +153,18 @@ def run(argv=None) -> int:
         log.close()
         _finalize_task(ts)
         if proc.returncode != 0:
-            failures.append((task.notebook, log_path))
+            failures.append((task.key, log_path))
         display.update(state, time.monotonic())
 
     # Leave the completed dashboard on screen, then a compact summary.
     display.update(state, time.monotonic())
     print()
     if failures:
-        print(f"{len(failures)} notebook(s) FAILED:")
-        for nb, log_path in failures:
-            print(f"  {nb}   (log: {log_path})")
+        print(f"{len(failures)} task(s) FAILED:")
+        for key, log_path in failures:
+            print(f"  {key}   (log: {log_path})")
         return 1
-    print(f"all {len(selected)} notebook(s) completed")
+    print(f"all {len(selected)} task(s) completed")
     return 0
 
 
