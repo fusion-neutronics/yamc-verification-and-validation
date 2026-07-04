@@ -293,6 +293,19 @@
          the gammas emitted by those subsequent decay products. Expect YAMC to show
          additional decay-photon flux and lines from the daughter nuclides; that extra
          signal is real physics OpenMC's D1S omits.</p>
+
+      <h4>Photon heating / KERMA tallies (secondary-photon benchmarks)</h4>
+      <p>Wherever photon heating is compared (the secondary-photon benchmarks), neither
+         code transports electrons or positrons, so the energy those particles would
+         carry is deposited locally instead. YAMC folds that electron and positron energy
+         into its <em>photon</em> heating tally (photon KERMA). OpenMC deposits the same
+         energy but books it separately, under its own electron and positron particle
+         filters, so an OpenMC photon-only heating tally is lower by that amount.</p>
+      <p>To compare heating like for like, the verification sums OpenMC's photon,
+         electron, and positron heating tallies and compares that total against YAMC's
+         single photon-heating number. The two are then equivalent. A raw YAMC-photon
+         vs OpenMC-photon-only comparison would differ by the electron and positron
+         contribution, which is a bookkeeping difference, not a physics one.</p>
     </div>
   </details>
 
