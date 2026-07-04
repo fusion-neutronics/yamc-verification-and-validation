@@ -53,11 +53,29 @@ SCORE_TO_MT = {
     "photoelectric": 522, "pair-production": 516,
 }
 
+# Electron-treatment matching. yamc and OpenMC are compared under the SAME
+# treatment; a mismatch (e.g. yamc's default TTB vs OpenMC LED) makes the
+# low-energy photon spectrum diverge spuriously (yamc issue #179). Keys are the
+# benchmark/OpenMC spelling; values are the yamc spelling (yamc says "local"
+# where OpenMC says "led").
+_YAMC_ELECTRON_TREATMENT = {"led": "local", "ttb": "ttb"}
+
+
+def _treatments(task: Task) -> list:
+    """Electron treatments to run (matched on both codes). Reads a list from
+    ``extras['electron_treatments']``, else falls back to the single
+    ``extras['electron_treatment']`` (default ``['led']``)."""
+    ts = task.extras.get("electron_treatments")
+    if ts:
+        return list(ts)
+    return [task.extras.get("electron_treatment", "led")]
+
 
 # --------------------------------------------------------------------------
 # Simulation runners
 # --------------------------------------------------------------------------
-def run_openmc_simulation(nuclide, neutron_path, element, photon_path, task: Task):
+def run_openmc_simulation(nuclide, neutron_path, element, photon_path, task: Task,
+                          electron_treatment: str = "led"):
     """Run OpenMC coupled neutron-photon simulation for a single nuclide."""
     import openmc as mc
 
@@ -96,10 +114,12 @@ def run_openmc_simulation(nuclide, neutron_path, element, photon_path, task: Tas
     )
     settings.verbosity = 1  # quiet OpenMC (combined with output=False on run)
     settings.photon_transport = True
-    # Local energy deposition (LED): secondary e-/e+ deposit ALL their KE at
-    # the interaction site, matching yamc photon KERMA. The default TTB radiates
-    # part of it as bremsstrahlung, which under-counts local heating by ~3%.
-    settings.electron_treatment = "led"
+    # Matched to yamc for a like-for-like comparison: 'led' (both deposit e-/e+
+    # KE locally, no bremsstrahlung -- isolates photon production + local KERMA)
+    # or 'ttb' (both radiate thick-target bremsstrahlung). A mismatch (yamc TTB
+    # vs OpenMC LED) makes the low-energy photon spectrum diverge spuriously
+    # (yamc issue #179).
+    settings.electron_treatment = electron_treatment
 
     # Filters and tallies
     cell_filter = mc.CellFilter(cell)
@@ -236,7 +256,8 @@ def run_openmc_simulation(nuclide, neutron_path, element, photon_path, task: Tas
     }
 
 
-def run_yamc_simulation(nuclide, neutron_path, element, photon_path, task: Task, compute="cpu"):
+def run_yamc_simulation(nuclide, neutron_path, element, photon_path, task: Task, compute="cpu",
+                        electron_treatment: str = "led"):
     """Run YAMC coupled neutron-photon simulation for a single nuclide. Returns (results_dict, model)."""
     import yamc as mc
 
@@ -329,6 +350,8 @@ def run_yamc_simulation(nuclide, neutron_path, element, photon_path, task: Task,
         tallies=tallies,
         source=source,
         transport_secondary_photons=True,
+        # Matched to the OpenMC reference (yamc "local" == OpenMC "led").
+        electron_treatment=_YAMC_ELECTRON_TREATMENT[electron_treatment],
         verbose=[],
     )
     _t0 = time.perf_counter()
@@ -734,12 +757,12 @@ def discover(task: Task, run_openmc: bool) -> list[tuple]:
     return discovery.discover_coupled_nuclides(task.nuclear_data_dir, task.library, run_openmc)
 
 
-def _metas(task: Task):
+def _metas(task: Task, electron_treatment: str):
     from cache_utils import yamc_fingerprint
 
     openmc_meta = {
         "library": task.library,
-        "electron_treatment": task.extras["electron_treatment"],
+        "electron_treatment": electron_treatment,
         "particles": task.particles,
         "batches": task.batches,
         "source_energy": task.source_energy,
@@ -767,9 +790,10 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
-    openmc_meta, yamc_meta = _metas(task)
+    treatments = _treatments(task)
     nuclides = discover(task, b.run_openmc)
-    print(f"Running coupled simulations for {len(nuclides)} nuclides...")
+    print(f"Running coupled simulations for {len(nuclides)} nuclides "
+          f"x {len(treatments)} electron treatment(s) {treatments}...")
     for nuc, _, elem, _ in nuclides:
         print(f"  {nuc} ({elem})")
 
@@ -779,38 +803,49 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
         print(f"\nProcessing {nuclide} ({element})...")
         per_nuclide = {'element': element}
 
-        if b.run_openmc:
-            try:
-                per_nuclide['openmc'] = run_step(
-                    cache_dir, task.library, "openmc", nuclide,
-                    lambda n=nuclide, npath=neutron_path, el=element, ppath=photon_path:
-                        run_openmc_simulation(n, npath, el, ppath, task),
-                    meta=openmc_meta, cache=True)
-                print(f"  OpenMC: {per_nuclide['openmc']['particles/s']:.0f} particles/s")
-            except Exception as e:  # noqa: BLE001 - isolate backend failures
-                print(f"  OpenMC Error: {e}")
+        # One matched (openmc, yamc) pair per electron treatment. The cache code
+        # is qualified by treatment (openmc-led / openmc-ttb / yamc-cpu-led ...)
+        # so both live side by side; the result keys carry the treatment suffix
+        # and `display_results` groups by treatment.
+        for treatment in treatments:
+            openmc_meta, yamc_meta = _metas(task, treatment)
 
-        for compute in b.computes:
-            captured = {}
+            if b.run_openmc:
+                try:
+                    per_nuclide[f'openmc-{treatment}'] = run_step(
+                        cache_dir, task.library, f"openmc-{treatment}", nuclide,
+                        lambda n=nuclide, npath=neutron_path, el=element, ppath=photon_path,
+                        t=treatment:
+                            run_openmc_simulation(n, npath, el, ppath, task, electron_treatment=t),
+                        meta=openmc_meta, cache=True)
+                    print(f"  OpenMC ({treatment}): "
+                          f"{per_nuclide[f'openmc-{treatment}']['particles/s']:.0f} particles/s")
+                except Exception as e:  # noqa: BLE001 - isolate backend failures
+                    print(f"  OpenMC ({treatment}) Error: {e}")
 
-            def _run(n=nuclide, npath=neutron_path, el=element, ppath=photon_path,
-                     c=compute, cap=captured):
-                res, model = run_yamc_simulation(n, npath, el, ppath, task, compute=c)
-                cap["model"] = model
-                return res
+            for compute in b.computes:
+                captured = {}
 
-            try:
-                yamc_results = run_step(
-                    cache_dir, task.library, f"yamc-{compute}", nuclide, _run,
-                    meta=yamc_meta, cache=task.caches_yamc)
-                per_nuclide[f'yamc-{compute}'] = yamc_results
-                if first_yamc_model is None and "model" in captured:
-                    first_yamc_model = captured["model"]
-                print(f"  YAMC ({compute}): {yamc_results['particles/s']:.0f} particles/s")
-            except Exception as e:  # noqa: BLE001
-                print(f"  YAMC ({compute}) Error: {e}")
+                def _run(n=nuclide, npath=neutron_path, el=element, ppath=photon_path,
+                         c=compute, t=treatment, cap=captured):
+                    res, model = run_yamc_simulation(
+                        n, npath, el, ppath, task, compute=c, electron_treatment=t)
+                    cap["model"] = model
+                    return res
 
-        if 'openmc' in per_nuclide or any(k.startswith('yamc-') for k in per_nuclide):
+                try:
+                    yamc_results = run_step(
+                        cache_dir, task.library, f"yamc-{compute}-{treatment}", nuclide, _run,
+                        meta=yamc_meta, cache=task.caches_yamc)
+                    per_nuclide[f'yamc-{compute}-{treatment}'] = yamc_results
+                    if first_yamc_model is None and "model" in captured:
+                        first_yamc_model = captured["model"]
+                    print(f"  YAMC ({compute}, {treatment}): "
+                          f"{yamc_results['particles/s']:.0f} particles/s")
+                except Exception as e:  # noqa: BLE001
+                    print(f"  YAMC ({compute}, {treatment}) Error: {e}")
+
+        if len(per_nuclide) > 1:  # more than just 'element'
             all_results[nuclide] = per_nuclide
 
     print(f"\nCompleted {len(all_results)} / {len(nuclides)} nuclides successfully.")
@@ -833,72 +868,85 @@ def display_geometry(model, task: Task):
 
 
 def display_results(task: Task, all_results: dict):
-    """Render per-nuclide neutron+photon comparison plots, agreement tables, and tally tables."""
+    """Render per-nuclide neutron+photon comparison plots, agreement tables, and
+    tally tables, grouped by electron treatment (matched yamc/OpenMC pairs)."""
     from IPython.display import Markdown, display
 
     mt_descriptions = _mt_descriptions()
+    treatments = _treatments(task)
 
     for nuclide, results in all_results.items():
-        openmc_results = results.get('openmc')  # may be None when openmc-cpu not in backends
         element = results['element']
-        yamc_by_backend = {k[len("yamc-"):]: res for k, res in results.items()
-                           if k.startswith("yamc-")}
-
         display(Markdown(f"## {nuclide} ({element})"))
-
-        # Performance - one entry per code/backend that ran
-        perf_parts = []
-        if openmc_results is not None:
-            perf_parts.append(f"OpenMC: {openmc_results['particles/s']:,.0f} particles/s")
-        for b, res in yamc_by_backend.items():
-            perf_parts.append(f"YAMC ({b}): {res['particles/s']:,.0f} particles/s")
-        display(Markdown("**Performance:** " + " | ".join(perf_parts)))
-
-        # Comparisons need OpenMC plus at least one yamc backend.
-        if openmc_results is None or not yamc_by_backend:
-            only = "OpenMC" if openmc_results is not None else "YAMC"
-            display(Markdown(
-                f"*Only {only} ran; comparison plots and tables are skipped.*"
-            ))
-            print()
-            continue
-
-        # Per-backend spectra plots and spectral agreement (neutron + photon).
-        for b, res in yamc_by_backend.items():
-            n_fig = create_comparison_plot(
-                openmc_results['n_energy_bins'],
-                openmc_results['n_spectrum_mean'], openmc_results['n_spectrum_std'],
-                res['n_spectrum_mean'], res['n_spectrum_std'], task,
-                title_prefix='Neutron Flux', yamc_label=f'YAMC {b.upper()}'
-            )
-            n_fig.update_layout(title=f"{nuclide} - Neutron Flux Spectra (OpenMC CPU vs YAMC {b.upper()})")
-            n_fig.show()
-            display(Markdown(f"### Neutron Spectral Agreement (YAMC {b})"))
-            n_stats = calculate_spectral_agreement(
-                openmc_results['n_spectrum_mean'], res['n_spectrum_mean'],
-                openmc_results['n_spectrum_std'], res['n_spectrum_std'],
-            )
-            display(create_agreement_table(n_stats).style.hide(axis='index'))
-
-            p_fig = create_comparison_plot(
-                openmc_results['p_energy_bins'],
-                openmc_results['p_spectrum_mean'], openmc_results['p_spectrum_std'],
-                res['p_spectrum_mean'], res['p_spectrum_std'], task,
-                title_prefix='Photon Flux', yamc_label=f'YAMC {b.upper()}'
-            )
-            p_fig.update_layout(title=f"{nuclide} ({element}) - Photon Flux Spectra (OpenMC CPU vs YAMC {b.upper()})")
-            p_fig.show()
-            display(Markdown(f"### Photon Spectral Agreement (YAMC {b})"))
-            p_stats = calculate_spectral_agreement(
-                openmc_results['p_spectrum_mean'], res['p_spectrum_mean'],
-                openmc_results['p_spectrum_std'], res['p_spectrum_std'],
-            )
-            display(create_agreement_table(p_stats).style.hide(axis='index'))
-
-        # Combined tally tables, one column per backend.
-        display(Markdown("### Neutron Tally Comparison"))
-        display(create_neutron_tally_table(openmc_results, yamc_by_backend, mt_descriptions).style.hide(axis='index'))
-        display(Markdown("### Photon Tally Comparison"))
-        display(create_photon_tally_table(openmc_results, yamc_by_backend).style.hide(axis='index'))
-
+        for treatment in treatments:
+            openmc_results = results.get(f'openmc-{treatment}')
+            # keys look like `yamc-<compute>-<treatment>`; strip both ends.
+            yamc_by_backend = {
+                k[len("yamc-"):].rsplit(f"-{treatment}", 1)[0]: res
+                for k, res in results.items()
+                if k.startswith("yamc-") and k.endswith(f"-{treatment}")
+            }
+            display(Markdown(f"### Electron treatment: {treatment.upper()}"))
+            _display_one_treatment(
+                nuclide, element, openmc_results, yamc_by_backend, task, mt_descriptions)
         print()  # spacing between nuclides
+
+
+def _display_one_treatment(nuclide, element, openmc_results, yamc_by_backend, task,
+                           mt_descriptions):
+    """Render the matched OpenMC-vs-yamc comparison for one electron treatment."""
+    from IPython.display import Markdown, display
+
+    # Performance - one entry per code/backend that ran
+    perf_parts = []
+    if openmc_results is not None:
+        perf_parts.append(f"OpenMC: {openmc_results['particles/s']:,.0f} particles/s")
+    for b, res in yamc_by_backend.items():
+        perf_parts.append(f"YAMC ({b}): {res['particles/s']:,.0f} particles/s")
+    display(Markdown("**Performance:** " + " | ".join(perf_parts)))
+
+    # Comparisons need OpenMC plus at least one yamc backend.
+    if openmc_results is None or not yamc_by_backend:
+        only = "OpenMC" if openmc_results is not None else "YAMC"
+        display(Markdown(
+            f"*Only {only} ran; comparison plots and tables are skipped.*"
+        ))
+        return
+
+    # Per-backend spectra plots and spectral agreement (neutron + photon).
+    for b, res in yamc_by_backend.items():
+        n_fig = create_comparison_plot(
+            openmc_results['n_energy_bins'],
+            openmc_results['n_spectrum_mean'], openmc_results['n_spectrum_std'],
+            res['n_spectrum_mean'], res['n_spectrum_std'], task,
+            title_prefix='Neutron Flux', yamc_label=f'YAMC {b.upper()}'
+        )
+        n_fig.update_layout(title=f"{nuclide} - Neutron Flux Spectra (OpenMC CPU vs YAMC {b.upper()})")
+        n_fig.show()
+        display(Markdown(f"### Neutron Spectral Agreement (YAMC {b})"))
+        n_stats = calculate_spectral_agreement(
+            openmc_results['n_spectrum_mean'], res['n_spectrum_mean'],
+            openmc_results['n_spectrum_std'], res['n_spectrum_std'],
+        )
+        display(create_agreement_table(n_stats).style.hide(axis='index'))
+
+        p_fig = create_comparison_plot(
+            openmc_results['p_energy_bins'],
+            openmc_results['p_spectrum_mean'], openmc_results['p_spectrum_std'],
+            res['p_spectrum_mean'], res['p_spectrum_std'], task,
+            title_prefix='Photon Flux', yamc_label=f'YAMC {b.upper()}'
+        )
+        p_fig.update_layout(title=f"{nuclide} ({element}) - Photon Flux Spectra (OpenMC CPU vs YAMC {b.upper()})")
+        p_fig.show()
+        display(Markdown(f"### Photon Spectral Agreement (YAMC {b})"))
+        p_stats = calculate_spectral_agreement(
+            openmc_results['p_spectrum_mean'], res['p_spectrum_mean'],
+            openmc_results['p_spectrum_std'], res['p_spectrum_std'],
+        )
+        display(create_agreement_table(p_stats).style.hide(axis='index'))
+
+    # Combined tally tables, one column per backend.
+    display(Markdown("### Neutron Tally Comparison"))
+    display(create_neutron_tally_table(openmc_results, yamc_by_backend, mt_descriptions).style.hide(axis='index'))
+    display(Markdown("### Photon Tally Comparison"))
+    display(create_photon_tally_table(openmc_results, yamc_by_backend).style.hide(axis='index'))

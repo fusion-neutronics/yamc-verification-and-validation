@@ -105,7 +105,11 @@ for _geom, _dims, _nb in (("sphere", _SPHERE, "sphere"), ("broomstick", _BROOM, 
          label=f"secondary-photon {_geom}", item_kind="nuclide", codes=_mc_codes(),
          caches_yamc=True, particles=5_000_000, batches=10, source_energy=14.06e6, dims=_dims,
          extras={"neutron_group_structure": "VITAMIN-J-175",
-                 "photon_group_structure": "VITAMIN-J-42", "electron_treatment": "led"})
+                 "photon_group_structure": "VITAMIN-J-42",
+                 # Matched electron treatments: yamc and OpenMC are each run under
+                 # both LED and TTB so they compare like-for-like (a mismatch
+                 # makes the low-E photon spectrum diverge spuriously; yamc #179).
+                 "electron_treatments": ["led", "ttb"]})
 
 # ---- decay-photon (D1S; nuclide; caches YAMC) -----------------------------
 for _geom, _dims, _nb in (("sphere", _SPHERE, "sphere"), ("broomstick", _BROOM, "broomstick")):
