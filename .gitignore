@@ -222,5 +222,9 @@ __marimo__/
 !web/benchmarks.html
 !web/models/*.html
 
+# Local-preview artifacts for the benchmark database page (built on demand)
+web/benchmarks-index.json
+web/tasks
+
 # Generated reduced transmutation chains (regenerated per notebook run)
 *.chain.arrow

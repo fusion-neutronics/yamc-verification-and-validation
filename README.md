@@ -157,3 +157,37 @@ the editable extension the notebooks import.
 ```bash
 jupyter-book start   # serves at http://localhost:3000
 ```
+
+## The benchmark database page
+
+`web/benchmarks.html` is a standalone, dependency-free page (linked from the
+book's intro) that reads a generated `benchmarks-index.json` and lets you filter
+every cached benchmark by simulation type / geometry / library / element /
+nuclide, with headline agreement stats. Clicking a row expands a detail view
+with the interactive model geometry, the flux-spectrum comparison plot, and the
+reaction-rate table — the same content the notebooks render, pulled live from
+the on-disk cache. The index is built by:
+
+```bash
+python -m yamc_verify.index_builder --out benchmarks-index.json
+```
+
+(In CI, `.github/workflows/pages.yml` builds it and copies the page, the
+`web/models/` geometry viewers, and the results cache into the published site.)
+
+### Serving it locally
+
+`fetch` does not work from `file://`, so the page must be served over HTTP with
+`benchmarks-index.json`, `models/`, and the `tasks/` cache reachable at the
+paths it requests. The simplest way is to build the index into `web/`, symlink
+the cache in beside it, and serve that directory (both are git-ignored):
+
+```bash
+python -m yamc_verify.index_builder --out web/benchmarks-index.json
+ln -s ../tasks web/tasks
+python -m http.server 8321 --directory web
+# open http://localhost:8321/benchmarks.html
+```
+
+Rebuild `web/benchmarks-index.json` whenever the cache changes to pick up new
+results.
