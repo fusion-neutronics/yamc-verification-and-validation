@@ -56,6 +56,20 @@ def _worst_quality(qualities):
     return max(ranked, key=_QUALITY_ORDER.index) if ranked else None
 
 
+# Electron-treatment suffixes on secondary-photon codes (openmc-led, yamc-cpu-ttb,
+# ...). Splitting lets the index pair OpenMC and YAMC of the SAME treatment;
+# codes without a suffix (all other families) fall in the "" group unchanged.
+_TREATMENTS = ("led", "ttb")
+
+
+def _split_treatment(code: str):
+    """Return (base_code, treatment) e.g. ('openmc','led') or ('yamc-cpu','')."""
+    for t in _TREATMENTS:
+        if code.endswith(f"-{t}"):
+            return code[: -(len(t) + 1)], t
+    return code, ""
+
+
 def _jsonable(obj):
     """Plain JSON types only; numpy scalars unwrapped, non-finite floats -> None."""
     if isinstance(obj, dict):
@@ -290,17 +304,31 @@ def build_index(tasks_list=None, worst_n=15):
                 continue
             n_simulations += len(loaded)
             comparisons = []
-            if "openmc" in loaded:
-                _, omc_res = loaded["openmc"]
-                for code in sorted(loaded):
-                    if code == "openmc":
+            # Pair each OpenMC reference with the YAMC backends that share its
+            # electron-treatment suffix (openmc-led vs yamc-cpu-led, ...). Codes
+            # without a suffix form the "" group, so every other family is
+            # unchanged. The treatment (or None) is carried on each comparison.
+            by_treatment: dict = {}
+            for code in loaded:
+                base, treatment = _split_treatment(code)
+                by_treatment.setdefault(treatment, {})[base] = code
+            for treatment in sorted(by_treatment):
+                group = by_treatment[treatment]
+                ref = group.get("openmc")
+                if ref is None:
+                    continue
+                _, omc_res = loaded[ref]
+                for base in sorted(group):
+                    if base == "openmc":
                         continue
+                    code = group[base]
                     y_meta, y_res = loaded[code]
                     reduced_set = reduced_chains.get(key) if reduced_chains else None
                     cmp = _compare(task, omc_res, y_res, reduced_set=reduced_set)
                     if cmp is not None:
                         comparisons.append({
                             "code": code,
+                            "treatment": treatment or None,
                             "yamc_version": y_meta.get("yamc_version"),
                             "yamc_commit": y_meta.get("yamc_commit"),
                             **cmp,
