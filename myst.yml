@@ -1,10 +1,10 @@
 version: 1
 project:
   title: YAMC Verification
-  # The per-family notebooks are now run-and-cache drivers only; the results are
-  # presented by the interactive benchmark database page (web/benchmarks.html,
-  # linked from the intro and shipped by the Pages CI), so they are no longer in
-  # the book and are excluded from the build.
+  # The per-family notebooks are gone: runs are driven directly by the
+  # orchestrator (python -m yamc_verify.run_task), and results are presented by
+  # the interactive benchmark database page (web/benchmarks.html, linked from the
+  # intro and shipped by the Pages CI). The book is just the intro and dev notes.
   toc:
     - file: intro.md
     - file: developer-notes.md
@@ -19,8 +19,6 @@ project:
     - run_models.sh
     - LICENSE
     - README.md
-    # run-and-cache driver notebooks, presented by the benchmark database page
-    - tasks/**/*.ipynb
 site:
   options:
     logo: logo.png

@@ -13,11 +13,11 @@ YAMC is used as an editable install from a sibling `yamc` checkout (`../yamc`).
 
 ## Running the verification models
 
-`run_models.sh` executes the model notebooks in place and populates the on-disk
-results cache. It drives them through the `yamc_verify` orchestrator
-(`python -m yamc_verify.orchestrator`), which runs each notebook silently
-(`jupyter nbconvert` with native YAMC/OpenMC output captured) and renders a
-single **live, in-place dashboard** instead of a large scrolling log:
+`run_models.sh` runs the verification tasks and populates the on-disk results
+cache. It drives them through the `yamc_verify` orchestrator
+(`python -m yamc_verify.orchestrator`), which runs each task silently
+(`python -m yamc_verify.run_task` as a subprocess, output captured) and renders
+a single **live, in-place dashboard** instead of a large scrolling log:
 
 ```text
 running with YAMC 0.4.0, built 3 mins ago
@@ -64,7 +64,7 @@ YAMC_VERIFY_NUMBER_OF_SIMULATIONS=10 MC_BACKENDS=openmc-cpu,yamc-cpu ./run_model
 
 # EVERYTHING: every stable isotope/element, every model, on all three codes
 # (OpenMC CPU + YAMC CPU + YAMC GPU). `=-1` keeps only stable, non-radioactive
-# nuclides (and elements with a stable isotope); no notebook argument means all
+# nuclides (and elements with a stable isotope); no task argument means all
 # endf-b8.1 models. This is the full verification sweep - expect it to take a
 # long time and rely heavily on the cache.
 YAMC_VERIFY_NUMBER_OF_SIMULATIONS=-1 \
@@ -78,47 +78,49 @@ YAMC_VERIFY_NUMBER_OF_SIMULATIONS=0 \
 YAMC_VERIFY_NUCLIDES=Fe56 YAMC_VERIFY_ELEMENTS=Fe \
   MC_BACKENDS=openmc-cpu,yamc-cpu,yamc-gpu ./run_models.sh
 
-# a single model
-MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh tasks/transmutation/material-reaction-rate/endf-b8.1.ipynb
+# a single model (task key)
+MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh transmutation/material-reaction-rate/endf-b8.1
 ```
 
-Run `git restore tasks` afterwards if you only want the regenerated cache and not
-the executed notebook outputs.
+The runs only write to the on-disk cache (the database the benchmark page reads);
+there are no notebooks to clean up afterwards.
 
-You can also run the orchestrator directly (this is what `run_models.sh` calls):
+You can also run the orchestrator directly (this is what `run_models.sh` calls),
+or a single task without the dashboard:
 
 ```bash
-python -m yamc_verify.orchestrator                                  # all endf-b8.1 notebooks
-python -m yamc_verify.orchestrator tasks/neutron/sphere/endf-b8.1.ipynb
+python -m yamc_verify.orchestrator                          # all endf-b8.1 tasks
+python -m yamc_verify.orchestrator neutron/sphere/endf-b8.1
+python -m yamc_verify.run_task neutron/sphere/endf-b8.1     # one task, no dashboard
 ```
 
 ## Shared code (`yamc_verify/`)
 
-The per-notebook logic that used to be copy-pasted across every model notebook
-now lives in the `yamc_verify/` package, so the notebooks are thin (a task
-lookup plus a few calls):
+All the model logic lives in the `yamc_verify/` package. Runs are driven directly
+from it (there are no notebooks):
 
-- `tasks.py` — the task registry (one `Task` per notebook: library, geometry,
-  particle statistics, which codes run, whether YAMC is cached). Single source
-  of truth shared by the notebooks and the orchestrator.
-- `families/` — per-physics-family simulation runners, plotting, metrics, and
-  the run/display glue (`neutron`, `photon`, `secondary_photon`, `decay_photon`,
-  `transmutation`). YAMC runs with `verbose=[]` and OpenMC with `verbosity=1` +
-  `output=False`, so a notebook is silent whether run here or directly in Jupyter.
+- `tasks.py` — the task registry (one `Task` per model/geometry/library: library,
+  geometry, particle statistics, which codes run, whether YAMC is cached). Single
+  source of truth shared by `run_task` and the orchestrator.
+- `families/` — per-physics-family simulation runners, plotting, and metrics
+  (`neutron`, `photon`, `secondary_photon`, `decay_photon`, `transmutation`),
+  each exposing `run_all(task, backends, cache_dir=...)`. YAMC runs with
+  `verbose=[]` and OpenMC with `verbosity=1` + `output=False`, so runs are silent.
+- `run_task.py` — drives one task: dispatches `task.family` to its family module's
+  `run_all` and caches the results. This is what the orchestrator runs per task.
 - `geometry.py`, `discovery.py`, `plotting.py` — shared geometry builders, item
   discovery, and generic spectrum-comparison plotting/metrics.
 - `progress.py`, `plan.py`, `dashboard.py`, `orchestrator.py` — the live
-  dashboard: a progress side-channel, the up-front plan, rendering, and the
-  notebook runner.
+  dashboard: a progress side-channel, the up-front plan, rendering, and the runner.
+- `index_builder.py`, `reduced_chains.py` — build the `benchmarks-index.json` the
+  web page reads, and precompute OpenMC reduced-chain membership for it.
 
-A model notebook is now roughly:
+Running one task in code is roughly:
 
 ```python
 from yamc_verify import backends, get_task
-from yamc_verify.families import neutron
-TASK = get_task("neutron/sphere/endf-b8.1")
-all_results, first_yamc_model = neutron.run_all(TASK, backends.resolve())
-neutron.display_results(TASK, all_results)
+from yamc_verify.run_task import run_task
+run_task(get_task("neutron/sphere/endf-b8.1"), backends.resolve())
 ```
 
 ## Auditing YAMC vs OpenMC agreement
