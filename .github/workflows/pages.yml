@@ -41,7 +41,13 @@ jobs:
         run: python -m yamc_verify.index_builder --out _build/html/benchmarks-index.json
 
       - name: Add benchmark database page
-        run: cp web/benchmarks.html _build/html/benchmarks.html
+        run: |
+          cp web/benchmarks.html _build/html/benchmarks.html
+          cp -r web/models _build/html/models
+
+      # detail views lazy-load per-benchmark cache JSON (~19 MB total)
+      - name: Publish results cache for the database page
+        run: find tasks -path '*/cache/*' -name '*.json' -exec cp --parents -t _build/html {} +
 
       - uses: actions/configure-pages@v5
         with:

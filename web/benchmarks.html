@@ -164,7 +164,46 @@
     padding: 7px 12px; border-bottom: 1px solid var(--grid);
     vertical-align: top; white-space: nowrap;
   }
-  tbody tr:hover { background: var(--hover-wash); }
+  tbody tr.expandable { cursor: pointer; }
+  tbody tr.expandable:hover { background: var(--hover-wash); }
+  tbody tr.expanded { background: var(--hover-wash); }
+  .expander {
+    all: unset; cursor: pointer; color: var(--muted);
+    font-size: 10px; padding: 2px 4px;
+  }
+  .expander:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  tr.detail-row > td { padding: 0; white-space: normal; }
+
+  /* ---- benchmark detail panel ---- */
+  .detail { padding: 14px 16px 18px; background: var(--page); }
+  .detail .perf { font-size: 12.5px; color: var(--ink-2); margin: 0 0 8px; }
+  .detail .cmp-badges { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 12px; font-size: 12.5px; }
+  .detail-grid { display: grid; grid-template-columns: minmax(300px, 460px) minmax(0, 1fr); gap: 12px; align-items: start; }
+  @media (max-width: 950px) { .detail-grid { grid-template-columns: 1fr; } }
+  .detail .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .detail h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+  .detail .note { color: var(--muted); font-size: 11.5px; margin: 6px 0 0; }
+  .model-frame { width: 100%; height: 500px; border: 0; border-radius: 6px; background: #1a1a2e; }
+  .plot-div { width: 100%; }
+  .tally-wrap { overflow-x: auto; margin-top: 12px; }
+  table.tally { border-collapse: collapse; width: 100%; }
+  table.tally th, table.tally td {
+    padding: 5px 10px; font-size: 12px; text-align: left;
+    border-bottom: 1px solid var(--grid); white-space: nowrap;
+  }
+  table.tally th { color: var(--muted); font-weight: 600; position: static; box-shadow: none; }
+  table.tally td.val { font-variant-numeric: tabular-nums; }
+  .step-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .step-btns button {
+    font: inherit; font-size: 12px; color: var(--ink-2);
+    background: none; border: 1px solid var(--baseline); border-radius: 999px;
+    padding: 3px 11px; cursor: pointer;
+  }
+  .step-btns button[aria-pressed="true"] {
+    color: var(--ink); border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .detail .error { color: var(--q-poor); font-size: 12.5px; }
   td.num { font-variant-numeric: tabular-nums; }
   .dim { color: var(--muted); }
   .item-cell { font-weight: 600; }
@@ -561,6 +600,14 @@
   /* ---------- results table ---------- */
 
   var COLUMNS = [
+    { key: "expand", label: "", sortable: false, render: function (td, r) {
+        var b = el("button", "expander", "▸");
+        b.type = "button";
+        b.setAttribute("aria-expanded", "false");
+        b.setAttribute("aria-label", "Show details for " + r.item + " " +
+                       (FAMILY_LABEL[r.family] || r.family) + " " + r.geometry);
+        td.appendChild(b);
+      } },
     { key: "family", label: "Simulation type", sortable: true,
       value: function (r) { return FAMILY_LABEL[r.family] || r.family; } },
     { key: "geometry", label: "Geometry", sortable: true,
@@ -663,6 +710,7 @@
     var frag = document.createDocumentFragment();
     sortRecords(recs).forEach(function (r) {
       var tr = document.createElement("tr");
+      tr.className = "expandable";
       COLUMNS.forEach(function (col) {
         var td = document.createElement("td");
         if (col.cls) td.className = col.cls;
@@ -670,10 +718,681 @@
         else td.textContent = col.value(r);
         tr.appendChild(td);
       });
+      tr.addEventListener("click", function (ev) {
+        if (ev.target.closest("a")) return;
+        toggleDetail(r, tr);
+      });
       frag.appendChild(tr);
     });
     body.appendChild(frag);
     $("empty").hidden = recs.length > 0;
+  }
+
+  /* ---------- benchmark detail: cached-result fetch layer ---------- */
+
+  /* MT number -> reaction name (yamc.data.reaction_names()); injected at build */
+  var REACTION_NAMES = {"1":"(n,total)","2":"(n,elastic)","3":"(n,nonelastic)","4":"(n,level)","5":"(n,misc)","11":"(n,2nd)","16":"(n,2n)","17":"(n,3n)","18":"(n,fission)","19":"(n,f)","20":"(n,nf)","21":"(n,2nf)","22":"(n,na)","23":"(n,n3a)","24":"(n,2na)","25":"(n,3na)","27":"(n,absorption)","28":"(n,np)","29":"(n,n2a)","30":"(n,2n2a)","32":"(n,nd)","33":"(n,nt)","34":"(n,n3He)","35":"(n,nd2a)","36":"(n,nt2a)","37":"(n,4n)","38":"(n,3nf)","41":"(n,2np)","42":"(n,3np)","44":"(n,n2p)","45":"(n,npa)","51":"(n,n1)","52":"(n,n2)","53":"(n,n3)","54":"(n,n4)","55":"(n,n5)","56":"(n,n6)","57":"(n,n7)","58":"(n,n8)","59":"(n,n9)","60":"(n,n10)","61":"(n,n11)","62":"(n,n12)","63":"(n,n13)","64":"(n,n14)","65":"(n,n15)","66":"(n,n16)","67":"(n,n17)","68":"(n,n18)","69":"(n,n19)","70":"(n,n20)","71":"(n,n21)","72":"(n,n22)","73":"(n,n23)","74":"(n,n24)","75":"(n,n25)","76":"(n,n26)","77":"(n,n27)","78":"(n,n28)","79":"(n,n29)","80":"(n,n30)","81":"(n,n31)","82":"(n,n32)","83":"(n,n33)","84":"(n,n34)","85":"(n,n35)","86":"(n,n36)","87":"(n,n37)","88":"(n,n38)","89":"(n,n39)","90":"(n,n40)","91":"(n,nc)","101":"(n,disappear)","102":"(n,gamma)","103":"(n,p)","104":"(n,d)","105":"(n,t)","106":"(n,3He)","107":"(n,a)","108":"(n,2a)","109":"(n,3a)","111":"(n,2p)","112":"(n,pa)","113":"(n,t2a)","114":"(n,d2a)","115":"(n,pd)","116":"(n,pt)","117":"(n,da)","152":"(n,5n)","153":"(n,6n)","154":"(n,2nt)","155":"(n,ta)","156":"(n,4np)","157":"(n,3nd)","158":"(n,nda)","159":"(n,2npa)","160":"(n,7n)","161":"(n,8n)","162":"(n,5np)","163":"(n,6np)","164":"(n,7np)","165":"(n,4na)","166":"(n,5na)","167":"(n,6na)","168":"(n,7na)","169":"(n,4nd)","170":"(n,5nd)","171":"(n,6nd)","172":"(n,3nt)","173":"(n,4nt)","174":"(n,5nt)","175":"(n,6nt)","176":"(n,2n3He)","177":"(n,3n3He)","178":"(n,4n3He)","179":"(n,3n2p)","180":"(n,3n2a)","181":"(n,3npa)","182":"(n,dt)","183":"(n,npd)","184":"(n,npt)","185":"(n,ndt)","186":"(n,np3He)","187":"(n,nd3He)","188":"(n,nt3He)","189":"(n,nta)","190":"(n,2n2p)","191":"(n,p3He)","192":"(n,d3He)","193":"(n,3Hea)","194":"(n,4n2p)","195":"(n,4n2a)","196":"(n,4npa)","197":"(n,3p)","198":"(n,n3p)","199":"(n,3n2pa)","200":"(n,5n2p)","203":"(n,Xp)","204":"(n,Xd)","205":"(n,Xt)","206":"(n,X3He)","207":"(n,Xa)","301":"heating","444":"damage-energy","600":"(n,p0)","601":"(n,p1)","602":"(n,p2)","603":"(n,p3)","604":"(n,p4)","605":"(n,p5)","606":"(n,p6)","607":"(n,p7)","608":"(n,p8)","609":"(n,p9)","610":"(n,p10)","611":"(n,p11)","612":"(n,p12)","613":"(n,p13)","614":"(n,p14)","615":"(n,p15)","616":"(n,p16)","617":"(n,p17)","618":"(n,p18)","619":"(n,p19)","620":"(n,p20)","621":"(n,p21)","622":"(n,p22)","623":"(n,p23)","624":"(n,p24)","625":"(n,p25)","626":"(n,p26)","627":"(n,p27)","628":"(n,p28)","629":"(n,p29)","630":"(n,p30)","631":"(n,p31)","632":"(n,p32)","633":"(n,p33)","634":"(n,p34)","635":"(n,p35)","636":"(n,p36)","637":"(n,p37)","638":"(n,p38)","639":"(n,p39)","640":"(n,p40)","641":"(n,p41)","642":"(n,p42)","643":"(n,p43)","644":"(n,p44)","645":"(n,p45)","646":"(n,p46)","647":"(n,p47)","648":"(n,p48)","649":"(n,pc)","650":"(n,d0)","651":"(n,d1)","652":"(n,d2)","653":"(n,d3)","654":"(n,d4)","655":"(n,d5)","656":"(n,d6)","657":"(n,d7)","658":"(n,d8)","659":"(n,d9)","660":"(n,d10)","661":"(n,d11)","662":"(n,d12)","663":"(n,d13)","664":"(n,d14)","665":"(n,d15)","666":"(n,d16)","667":"(n,d17)","668":"(n,d18)","669":"(n,d19)","670":"(n,d20)","671":"(n,d21)","672":"(n,d22)","673":"(n,d23)","674":"(n,d24)","675":"(n,d25)","676":"(n,d26)","677":"(n,d27)","678":"(n,d28)","679":"(n,d29)","680":"(n,d30)","681":"(n,d31)","682":"(n,d32)","683":"(n,d33)","684":"(n,d34)","685":"(n,d35)","686":"(n,d36)","687":"(n,d37)","688":"(n,d38)","689":"(n,d39)","690":"(n,d40)","691":"(n,d41)","692":"(n,d42)","693":"(n,d43)","694":"(n,d44)","695":"(n,d45)","696":"(n,d46)","697":"(n,d47)","698":"(n,d48)","699":"(n,dc)","700":"(n,t0)","701":"(n,t1)","702":"(n,t2)","703":"(n,t3)","704":"(n,t4)","705":"(n,t5)","706":"(n,t6)","707":"(n,t7)","708":"(n,t8)","709":"(n,t9)","710":"(n,t10)","711":"(n,t11)","712":"(n,t12)","713":"(n,t13)","714":"(n,t14)","715":"(n,t15)","716":"(n,t16)","717":"(n,t17)","718":"(n,t18)","719":"(n,t19)","720":"(n,t20)","721":"(n,t21)","722":"(n,t22)","723":"(n,t23)","724":"(n,t24)","725":"(n,t25)","726":"(n,t26)","727":"(n,t27)","728":"(n,t28)","729":"(n,t29)","730":"(n,t30)","731":"(n,t31)","732":"(n,t32)","733":"(n,t33)","734":"(n,t34)","735":"(n,t35)","736":"(n,t36)","737":"(n,t37)","738":"(n,t38)","739":"(n,t39)","740":"(n,t40)","741":"(n,t41)","742":"(n,t42)","743":"(n,t43)","744":"(n,t44)","745":"(n,t45)","746":"(n,t46)","747":"(n,t47)","748":"(n,t48)","749":"(n,tc)","750":"(n,3He0)","751":"(n,3He1)","752":"(n,3He2)","753":"(n,3He3)","754":"(n,3He4)","755":"(n,3He5)","756":"(n,3He6)","757":"(n,3He7)","758":"(n,3He8)","759":"(n,3He9)","760":"(n,3He10)","761":"(n,3He11)","762":"(n,3He12)","763":"(n,3He13)","764":"(n,3He14)","765":"(n,3He15)","766":"(n,3He16)","767":"(n,3He17)","768":"(n,3He18)","769":"(n,3He19)","770":"(n,3He20)","771":"(n,3He21)","772":"(n,3He22)","773":"(n,3He23)","774":"(n,3He24)","775":"(n,3He25)","776":"(n,3He26)","777":"(n,3He27)","778":"(n,3He28)","779":"(n,3He29)","780":"(n,3He30)","781":"(n,3He31)","782":"(n,3He32)","783":"(n,3He33)","784":"(n,3He34)","785":"(n,3He35)","786":"(n,3He36)","787":"(n,3He37)","788":"(n,3He38)","789":"(n,3He39)","790":"(n,3He40)","791":"(n,3He41)","792":"(n,3He42)","793":"(n,3He43)","794":"(n,3He44)","795":"(n,3He45)","796":"(n,3He46)","797":"(n,3He47)","798":"(n,3He48)","799":"(n,3Hec)","800":"(n,a0)","801":"(n,a1)","802":"(n,a2)","803":"(n,a3)","804":"(n,a4)","805":"(n,a5)","806":"(n,a6)","807":"(n,a7)","808":"(n,a8)","809":"(n,a9)","810":"(n,a10)","811":"(n,a11)","812":"(n,a12)","813":"(n,a13)","814":"(n,a14)","815":"(n,a15)","816":"(n,a16)","817":"(n,a17)","818":"(n,a18)","819":"(n,a19)","820":"(n,a20)","821":"(n,a21)","822":"(n,a22)","823":"(n,a23)","824":"(n,a24)","825":"(n,a25)","826":"(n,a26)","827":"(n,a27)","828":"(n,a28)","829":"(n,a29)","830":"(n,a30)","831":"(n,a31)","832":"(n,a32)","833":"(n,a33)","834":"(n,a34)","835":"(n,a35)","836":"(n,a36)","837":"(n,a37)","838":"(n,a38)","839":"(n,a39)","840":"(n,a40)","841":"(n,a41)","842":"(n,a42)","843":"(n,a43)","844":"(n,a44)","845":"(n,a45)","846":"(n,a46)","847":"(n,a47)","848":"(n,a48)","849":"(n,ac)","875":"(n,2n0)","876":"(n,2n1)","877":"(n,2n2)","878":"(n,2n3)","879":"(n,2n4)","880":"(n,2n5)","881":"(n,2n6)","882":"(n,2n7)","883":"(n,2n8)","884":"(n,2n9)","885":"(n,2n10)","886":"(n,2n11)","887":"(n,2n12)","888":"(n,2n13)","889":"(n,2n14)","890":"(n,2n15)","891":"(n,2nc)","901":"heating-local"};
+
+  var PLOTLY_SRC = "https://cdn.plot.ly/plotly-2.35.2.min.js";
+  var plotlyPromise = null;
+  function ensurePlotly() {
+    if (window.Plotly) return Promise.resolve();
+    if (!plotlyPromise) {
+      plotlyPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement("script");
+        s.src = PLOTLY_SRC;
+        s.onload = resolve;
+        s.onerror = function () {
+          plotlyPromise = null;
+          reject(new Error("could not load plotly.js from " + PLOTLY_SRC));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    return plotlyPromise;
+  }
+
+  function decodeNp(o) {
+    if (o && typeof o === "object") {
+      if (o._np_array !== undefined) return o._np_array;
+      if (Array.isArray(o)) return o.map(decodeNp);
+      var out = {};
+      for (var k in o) out[k] = decodeNp(o[k]);
+      return out;
+    }
+    return o;
+  }
+
+  var cacheStore = {};
+  function fetchCache(path) {
+    if (!cacheStore[path]) {
+      cacheStore[path] = fetch(path)
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status + " for " + path);
+          return r.json();
+        })
+        .then(function (d) { return { meta: d._meta || {}, results: decodeNp(d.results || {}) }; });
+      cacheStore[path].catch(function () { delete cacheStore[path]; });
+    }
+    return cacheStore[path];
+  }
+
+  /* ---------- benchmark detail: plot + table builders ---------- */
+
+  /* notebook conventions: yamc_verify.plotting.BACKEND_STYLES / RATIO_COLORS */
+  var PLOT_STYLES = {
+    "OpenMC CPU": { color: "blue", dash: null },
+    "YAMC CPU": { color: "red", dash: "dash" },
+    "YAMC GPU": { color: "orange", dash: "dot" }
+  };
+  var RATIO_COLORS = {
+    "YAMC CPU / OpenMC CPU": "green",
+    "YAMC GPU / OpenMC CPU": "purple",
+    "YAMC GPU / YAMC CPU": "teal"
+  };
+  var STEP_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#4a3aa7", "#e34948",
+                     "#e87ba4", "#eb6834", "#008300"];
+  var FLUX_DECADES = 6;
+
+  function isDark() {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function plotlyLayout(extra) {
+    var dark = isDark();
+    var base = {
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      font: { color: dark ? "#c3c2b7" : "#52514e", size: 11 },
+      margin: { l: 60, r: 16, t: 34, b: 42 },
+      height: 460
+    };
+    for (var k in extra) base[k] = extra[k];
+    return base;
+  }
+  function axisDefaults() {
+    var dark = isDark();
+    return { gridcolor: dark ? "#2c2c2a" : "#e1e0d9",
+             linecolor: dark ? "#383835" : "#c3c2b7", zeroline: false };
+  }
+
+  function stepXY(bins, values) {
+    var x = [], y = [];
+    for (var i = 0; i < values.length; i++) {
+      x.push(bins[i], bins[i + 1]);
+      y.push(values[i], values[i]);
+    }
+    return { x: x, y: y };
+  }
+
+  /* one spectrum figure: flux/lethargy steps + error markers + ratio-vs-reference */
+  function spectrumFigure(node, title, bins, series, maxEnergy) {
+    var lethargy = [], centers = [];
+    for (var i = 0; i < bins.length - 1; i++) {
+      lethargy.push(Math.log10(bins[i + 1] / bins[i]));
+      centers.push(Math.sqrt(bins[i] * bins[i + 1]));
+    }
+    var perLeth = series.map(function (s) {
+      return {
+        label: s.label,
+        flux: s.mean.map(function (v, j) { return v / lethargy[j]; }),
+        std: s.std.map(function (v, j) { return v / lethargy[j]; })
+      };
+    });
+    var maxFlux = 0;
+    perLeth.forEach(function (s) {
+      s.flux.forEach(function (v) { if (v > maxFlux) maxFlux = v; });
+    });
+    var threshold = maxFlux / Math.pow(10, FLUX_DECADES);
+    var firstBin = bins.length - 2;
+    perLeth.forEach(function (s) {
+      for (var j = 0; j < s.flux.length; j++) {
+        if (s.flux[j] > 0) { if (j < firstBin) firstBin = j; break; }
+      }
+    });
+    var minE = bins[Math.max(firstBin, 0)];
+    var maxE = maxEnergy || bins[bins.length - 1];
+
+    var ref = null;
+    perLeth.forEach(function (s) { if (s.label === "OpenMC CPU") ref = s; });
+    if (!ref && perLeth.length >= 2) ref = perLeth[0];
+    var ratios = ref ? perLeth.filter(function (s) { return s !== ref; }) : [];
+    var showRatio = ratios.length > 0;
+
+    var traces = [];
+    perLeth.forEach(function (s) {
+      var masked = s.flux.map(function (v) { return v >= threshold ? v : null; });
+      var maskedStd = s.std.map(function (v, j) { return s.flux[j] >= threshold ? v : null; });
+      var style = PLOT_STYLES[s.label] || { color: "gray", dash: null };
+      var xy = stepXY(bins, masked);
+      traces.push({ x: xy.x, y: xy.y, mode: "lines", name: s.label,
+                    line: { color: style.color, width: 2, dash: style.dash || undefined } });
+      traces.push({ x: centers, y: masked, mode: "markers", showlegend: false,
+                    marker: { color: style.color, size: 4 },
+                    error_y: { type: "data", array: maskedStd, visible: true,
+                               color: style.color, thickness: 1 },
+                    hoverinfo: "skip" });
+    });
+    ratios.forEach(function (s) {
+      var r = s.flux.map(function (v, j) {
+        return (v > 0 && ref.flux[j] > 0) ? v / ref.flux[j] : null;
+      });
+      var name = s.label + " / " + ref.label;
+      var xy = stepXY(bins, r);
+      traces.push({ x: xy.x, y: xy.y, mode: "lines", name: name, yaxis: "y2",
+                    line: { color: RATIO_COLORS[name] || "green", width: 2 } });
+    });
+
+    var ax = axisDefaults();
+    var layout = plotlyLayout({
+      title: { text: title, font: { size: 13 } },
+      showlegend: true,
+      legend: { x: 0.02, y: 0.98, xanchor: "left", yanchor: "top", bgcolor: "rgba(0,0,0,0)" },
+      xaxis: Object.assign({}, ax, {
+        type: "log", title: { text: "Energy (eV)" }, exponentformat: "e",
+        range: [Math.log10(minE), Math.log10(maxE)]
+      }),
+      yaxis: Object.assign({}, ax, {
+        type: "log", title: { text: "Flux / Lethargy" }, exponentformat: "e",
+        domain: showRatio ? [0.42, 1] : [0, 1]
+      })
+    });
+    if (showRatio) {
+      layout.yaxis2 = Object.assign({}, ax, {
+        title: { text: "Ratio" }, range: [0.5, 1.5], domain: [0, 0.3]
+      });
+      layout.shapes = [{ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2",
+                         y0: 1, y1: 1, line: { color: "gray", dash: "dash", width: 1 } }];
+      layout.height = 560;
+    }
+    window.Plotly.newPlot(node, traces, layout, { responsive: true, displaylogo: false });
+  }
+
+  /* multi-timestep decay-photon spectra: one trace per step, flux per unit
+     lethargy with the notebook's max/10^FLUX_DECADES display threshold */
+  function decaySpectrumFigure(node, title, bins, loaded) {
+    var lethargy = [];
+    for (var i = 0; i < bins.length - 1; i++) lethargy.push(Math.log10(bins[i + 1] / bins[i]));
+
+    var perStep = [];
+    Object.keys(loaded).sort().forEach(function (code) {
+      var res = loaded[code].results;
+      var meta = loaded[code].meta;
+      var timesteps = meta.d1s_timesteps || [];
+      var rates = meta.d1s_source_rates || [];
+      var elapsed = 0;
+      (res.spectra || []).forEach(function (mean, i) {
+        elapsed += timesteps[i] || 0;
+        var phase = (rates[i] || 0) > 0 ? "irrad" : "cool";
+        var name = "Step " + (i + 1) + " (" + phase + ", t=" + fmtDuration(elapsed) + ")";
+        if (Object.keys(loaded).length > 1) name = CODE_LABEL[code] + " " + name;
+        perStep.push({ code: code, step: i, name: name,
+                       flux: mean.map(function (v, j) { return v / lethargy[j]; }) });
+      });
+    });
+
+    var maxFlux = 0, firstBin = bins.length - 2;
+    perStep.forEach(function (s) {
+      for (var j = 0; j < s.flux.length; j++) {
+        if (s.flux[j] > 0) {
+          if (j < firstBin) firstBin = j;
+          if (s.flux[j] > maxFlux) maxFlux = s.flux[j];
+        }
+      }
+    });
+    var threshold = maxFlux / Math.pow(10, FLUX_DECADES);
+
+    var traces = perStep.map(function (s) {
+      var masked = s.flux.map(function (v) { return v >= threshold ? v : null; });
+      var xy = stepXY(bins, masked);
+      return { x: xy.x, y: xy.y, mode: "lines", name: s.name,
+               line: { color: STEP_COLORS[s.step % STEP_COLORS.length], width: 2,
+                       dash: s.code === "openmc" ? undefined : "dash" } };
+    });
+    var ax = axisDefaults();
+    window.Plotly.newPlot(node, traces, plotlyLayout({
+      title: { text: title, font: { size: 13 } },
+      showlegend: true,
+      legend: { x: 0.02, y: 0.02, xanchor: "left", yanchor: "bottom", bgcolor: "rgba(0,0,0,0)" },
+      xaxis: Object.assign({}, ax, {
+        type: "log", title: { text: "Energy (eV)" }, exponentformat: "e",
+        range: [Math.log10(bins[Math.max(firstBin, 0)]), Math.log10(bins[bins.length - 1] * 1.1)]
+      }),
+      yaxis: Object.assign({}, ax, {
+        type: "log", title: { text: "Flux / Lethargy" }, exponentformat: "e"
+      })
+    }), { responsive: true, displaylogo: false });
+  }
+
+  function fmtDuration(seconds) {
+    if (seconds >= 86400) return (seconds / 86400).toFixed(0) + "d";
+    if (seconds >= 3600) return (seconds / 3600).toFixed(0) + "h";
+    return seconds.toFixed(0) + "s";
+  }
+  function fmtExp(v) {
+    return (typeof v === "number" && isFinite(v)) ? v.toExponential(4) : "N/A";
+  }
+  function fmtTally(v, s) {
+    if (typeof v !== "number" || !isFinite(v)) return "N/A";
+    return v.toExponential(4) + " ± " + ((typeof s === "number" && isFinite(s)) ? s.toExponential(2) : "?");
+  }
+  function relDiffText(v, ref) {
+    if (typeof v !== "number" || typeof ref !== "number" ||
+        !isFinite(v) || !isFinite(ref) || ref === 0) return "N/A";
+    return ((v - ref) / ref * 100).toFixed(2) + "%";
+  }
+  /* notebook convention (compare_transmutation_steps): unsigned |y-o|/max(|y|,|o|),
+     with a product missing from one code counted as density 0 */
+  function transmuteRelDiff(v, ref) {
+    var y = (typeof v === "number" && isFinite(v)) ? v : 0;
+    var o = (typeof ref === "number" && isFinite(ref)) ? ref : 0;
+    var denom = Math.max(Math.abs(y), Math.abs(o));
+    if (denom === 0) return "0.00%";
+    return (Math.abs(y - o) / denom * 100).toFixed(2) + "%";
+  }
+
+  function domTable(headers, rows, labelCols) {
+    if (labelCols === undefined) labelCols = 2;
+    var wrap = el("div", "tally-wrap");
+    var table = el("table", "tally");
+    var thead = document.createElement("thead");
+    var hr = document.createElement("tr");
+    headers.forEach(function (h) {
+      var th = el("th", null, h);
+      th.scope = "col";
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    rows.forEach(function (cells) {
+      var tr = document.createElement("tr");
+      cells.forEach(function (c, i) {
+        tr.appendChild(el("td", i >= labelCols ? "val" : null, c));
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  /* score name -> MT, mirroring neutron.py _score_to_mt (reaction_names reversed
+     plus the special OpenMC score aliases) */
+  var SCORE_TO_MT = null;
+  function scoreToMt(name) {
+    if (!SCORE_TO_MT) {
+      SCORE_TO_MT = {};
+      Object.keys(REACTION_NAMES).forEach(function (mt) { SCORE_TO_MT[REACTION_NAMES[mt]] = mt; });
+      var extra = { "total": "1", "elastic": "2", "absorption": "27", "fission": "18",
+                    "heating": "301", "heating-local": "901", "H1-production": "203",
+                    "H2-production": "204", "H3-production": "205", "He3-production": "206",
+                    "He4-production": "207" };
+      Object.keys(extra).forEach(function (k) { SCORE_TO_MT[k] = extra[k]; });
+    }
+    return SCORE_TO_MT[name] || null;
+  }
+
+  /* reaction-rate table: MT | Reaction | one column per code | rel diff vs reference.
+     Score aliases of the same MT merge into one row (notebook _best_value: prefer
+     the first nonzero value among the aliases). */
+  function tallyTable(loaded, meansKey, stdsKey) {
+    var codes = Object.keys(loaded).sort().filter(function (c) {
+      return loaded[c].results[meansKey];
+    });
+    if (!codes.length) return null;
+    var refCode = codes.indexOf("openmc") >= 0 ? "openmc" : codes[0];
+    var diffCodes = codes.filter(function (c) { return c !== refCode; });
+
+    var groups = {};
+    codes.forEach(function (c) {
+      Object.keys(loaded[c].results[meansKey]).forEach(function (key) {
+        var mt = /^\d+$/.test(key) ? key : scoreToMt(key);
+        var gid = mt !== null ? "mt:" + mt : "score:" + key;
+        if (!groups[gid]) groups[gid] = { mt: mt, keys: {} };
+        groups[gid].keys[key] = true;
+      });
+    });
+
+    function bestValue(code, keyList) {
+      var means = loaded[code].results[meansKey];
+      var stds = loaded[code].results[stdsKey] || {};
+      var val, std;
+      for (var i = 0; i < keyList.length; i++) {
+        var v = means[keyList[i]];
+        if (typeof v === "number" && isFinite(v) && v !== 0) return { v: v, s: stds[keyList[i]] };
+        if (val === undefined && v !== undefined) { val = v; std = stds[keyList[i]]; }
+      }
+      return { v: val, s: std };
+    }
+
+    var rows = [];
+    Object.keys(groups).forEach(function (gid) {
+      var g = groups[gid];
+      var keyList = Object.keys(g.keys);
+      var vals = {}, stds = {};
+      var any = false;
+      codes.forEach(function (c) {
+        var b = bestValue(c, keyList);
+        vals[c] = b.v;
+        stds[c] = b.s;
+        if (typeof b.v === "number" && isFinite(b.v) && b.v !== 0) any = true;
+      });
+      if (!any) return;
+      var named = keyList.filter(function (k) { return !/^\d+$/.test(k); });
+      var reaction = g.mt !== null ? (REACTION_NAMES[g.mt] || named[0] || "MT " + g.mt)
+                                   : keyList[0];
+      var cells = [g.mt !== null ? g.mt : "-", reaction];
+      codes.forEach(function (c) { cells.push(fmtTally(vals[c], stds[c])); });
+      diffCodes.forEach(function (c) { cells.push(relDiffText(vals[c], vals[refCode])); });
+      rows.push({ sort: g.mt !== null ? parseInt(g.mt, 10) : 9999, cells: cells });
+    });
+    if (!rows.length) return null;
+    rows.sort(function (a, b) {
+      return a.sort - b.sort || (a.cells[1] < b.cells[1] ? -1 : 1);
+    });
+    var headers = ["MT", "Reaction"].concat(
+      codes.map(function (c) { return CODE_LABEL[c] || c; }),
+      diffCodes.map(function (c) { return "Rel. diff " + (CODE_LABEL[c] || c) + " (%)"; }));
+    return domTable(headers, rows.map(function (r) { return r.cells; }));
+  }
+
+  /* transmutation: per-timestep nuclide density table with a step selector */
+  var DENSITY_CAP = 30;
+  function transmutationSection(rec, loaded) {
+    var box = el("div", "panel");
+    box.appendChild(el("h3", null, "Nuclide densities by timestep"));
+    var codes = Object.keys(loaded).sort().filter(function (c) { return loaded[c].results.steps; });
+    if (!codes.length) {
+      box.appendChild(el("p", "note", "No depletion steps in the cached results."));
+      return box;
+    }
+    var refCode = codes.indexOf("openmc") >= 0 ? "openmc" : codes[0];
+    var meta = loaded[refCode].meta;
+    var timesteps = meta.timesteps || [];
+    /* flux-spectrum caches store the schedule per code, not as source_rates */
+    var rates = meta.source_rates || meta.openmc_source_rates || meta.yamc_source_rates || [];
+    var nSteps = loaded[refCode].results.steps.length;
+
+    var btns = el("div", "step-btns");
+    var tableHolder = el("div");
+    var current = nSteps - 1;
+
+    function renderStep(idx) {
+      current = idx;
+      Array.prototype.forEach.call(btns.children, function (b, i) {
+        b.setAttribute("aria-pressed", String(i === idx));
+      });
+      tableHolder.textContent = "";
+      var products = {};
+      codes.forEach(function (c) {
+        var step = (loaded[c].results.steps || [])[idx] || {};
+        Object.keys(step).forEach(function (p) {
+          products[p] = Math.max(products[p] || 0, Math.abs(step[p]));
+        });
+      });
+      /* notebook DENSITY_THRESHOLD: drop products below 1e-15 in every code */
+      var names = Object.keys(products).filter(function (p) {
+        return products[p] >= 1e-15;
+      }).sort(function (a, b) { return products[b] - products[a]; });
+      var shown = names.slice(0, DENSITY_CAP);
+      var rows = shown.map(function (p) {
+        var vals = {};
+        codes.forEach(function (c) {
+          vals[c] = ((loaded[c].results.steps || [])[idx] || {})[p];
+        });
+        var out = [p];
+        codes.forEach(function (c) { out.push(fmtExp(vals[c])); });
+        codes.filter(function (c) { return c !== refCode; }).forEach(function (c) {
+          out.push(transmuteRelDiff(vals[c], vals[refCode]));
+        });
+        return out;
+      });
+      var headers = ["Nuclide"].concat(
+        codes.map(function (c) { return (CODE_LABEL[c] || c) + " (atoms/b·cm)"; }),
+        codes.filter(function (c) { return c !== refCode; })
+             .map(function (c) { return "Rel. diff " + (CODE_LABEL[c] || c) + " (%)"; }));
+      tableHolder.appendChild(domTable(headers, rows, 1));
+      if (names.length > shown.length) {
+        tableHolder.appendChild(el("p", "note",
+          "Showing the " + shown.length + " highest-density nuclides of " + names.length + "."));
+      }
+    }
+
+    var elapsed = 0;
+    for (var i = 0; i < nSteps; i++) {
+      elapsed += timesteps[i] || 0;
+      var phase = (rates[i] || 0) > 0 ? "irrad" : "cool";
+      var b = el("button", null, "Step " + (i + 1) + " · " + phase + " · t=" + fmtDuration(elapsed));
+      b.type = "button";
+      (function (idx) {
+        b.addEventListener("click", function () { renderStep(idx); });
+      })(i);
+      btns.appendChild(b);
+    }
+    box.appendChild(btns);
+    box.appendChild(tableHolder);
+    renderStep(current);
+    return box;
+  }
+
+  /* ---------- benchmark detail: assembly ---------- */
+
+  function modelFile(rec) {
+    if (rec.family === "transmutation-flux-spectrum") return null;
+    if (rec.family === "transmutation-reaction-rate") return "models/sphere-5.html";
+    if (rec.geometry === "sphere") return "models/sphere-35.html";
+    if (rec.geometry === "broomstick") return "models/broomstick.html";
+    return null;
+  }
+
+  function spectrumSpecs(rec, loaded) {
+    /* group cached spectra by kind across codes: [{title, bins, series:[{label,mean,std}]}] */
+    var specs = [];
+    function collect(title, binsKey, meanKey, stdKey, capToSource) {
+      var bins = null, series = [];
+      Object.keys(loaded).sort().forEach(function (code) {
+        var r = loaded[code].results;
+        if (!r[meanKey]) return;
+        if (!bins) bins = r[binsKey];
+        if (r[meanKey].length === bins.length - 1) {
+          series.push({ label: CODE_LABEL[code] || code, mean: r[meanKey], std: r[stdKey] || [] });
+        }
+      });
+      if (bins && series.length) {
+        specs.push({ title: title, bins: bins, series: series, capToSource: capToSource });
+      }
+    }
+    collect("Flux spectra comparison", "energy_bins", "flux_spectra_mean", "flux_spectra_std_dev", true);
+    /* secondary-photon notebook caps at bins[-1]*1.1, not the neutron source energy
+       (capture gammas extend above it) */
+    collect("Neutron spectrum", "n_energy_bins", "n_spectrum_mean", "n_spectrum_std", false);
+    collect("Photon spectrum", "p_energy_bins", "p_spectrum_mean", "p_spectrum_std", false);
+    return specs;
+  }
+
+  function sourceEnergy(loaded) {
+    var e = null;
+    Object.keys(loaded).forEach(function (c) {
+      if (loaded[c].meta.source_energy) e = loaded[c].meta.source_energy;
+    });
+    return e ? e * 1.1 : null;
+  }
+
+  function renderDetail(box, rec) {
+    box.textContent = "";
+    box.appendChild(el("p", "note", "Loading cached results…"));
+
+    var paths = Object.keys(rec.files).sort();
+    Promise.all(paths.map(function (code) {
+      return fetchCache(rec.files[code]).then(
+        function (d) { return { code: code, data: d }; },
+        function (err) { return { code: code, error: err }; });
+    })).then(function (fetched) {
+      box.textContent = "";
+      var loaded = {};
+      var failed = [];
+      fetched.forEach(function (f) {
+        if (f.data) loaded[f.code] = f.data;
+        else failed.push(f.code + " (" + f.error.message + ")");
+      });
+      if (failed.length) {
+        box.appendChild(el("p", "error",
+          "Could not load cached results for: " + failed.join(", ") +
+          ". The results cache may not be published alongside this page."));
+      }
+      if (!Object.keys(loaded).length) return;
+
+      /* performance line */
+      var perf = [];
+      Object.keys(loaded).sort().forEach(function (c) {
+        var r = loaded[c].results;
+        if (typeof r["particles/s"] === "number") {
+          perf.push((CODE_LABEL[c] || c) + ": " + Math.round(r["particles/s"]).toLocaleString("en-US") + " particles/s");
+        } else if (typeof r.time_s === "number") {
+          perf.push((CODE_LABEL[c] || c) + ": " + r.time_s.toFixed(1) + " s depletion");
+        }
+      });
+      if (perf.length) box.appendChild(el("p", "perf", "Performance — " + perf.join("  ·  ")));
+
+      /* agreement badges from the index */
+      if (rec.comparisons.length) {
+        var badges = el("div", "cmp-badges");
+        rec.comparisons.forEach(function (c) {
+          var badge = el("span", "badge");
+          var dot = el("span", "dot");
+          dot.style.background = QCOLOR[c.quality] || "var(--baseline)";
+          badge.appendChild(dot);
+          var m = c.kind === "transmutation"
+            ? "rms " + fmtPct(c.weighted_avg_rel_diff_pct) + " · max " + fmtPct(c.max_rel_diff_pct)
+            : "χ² " + fmtChi2(c.reduced_chi_squared) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
+          badge.appendChild(el("span", null,
+            (CODE_LABEL[c.code] || c.code) + " vs OpenMC: " + (c.quality || "n/a") + " (" + m + ")"));
+          badges.appendChild(badge);
+        });
+        box.appendChild(badges);
+      }
+
+      var grid = el("div", "detail-grid");
+      box.appendChild(grid);
+
+      /* geometry viewer */
+      var geoPanel = el("div", "panel");
+      geoPanel.appendChild(el("h3", null, "Model geometry (interactive)"));
+      var mf = modelFile(rec);
+      if (mf) {
+        var frame = document.createElement("iframe");
+        frame.className = "model-frame";
+        frame.src = mf;
+        frame.loading = "lazy";
+        frame.title = "Interactive geometry viewer (" + rec.geometry + ")";
+        geoPanel.appendChild(frame);
+        geoPanel.appendChild(el("p", "note",
+          "xz slice — the geometry is identical for every " + rec.item_kind + " in this task; " +
+          "only the material composition changes."));
+      } else {
+        geoPanel.appendChild(el("p", "note",
+          "No transport geometry: this task depletes a material against a fixed multigroup flux."));
+      }
+      grid.appendChild(geoPanel);
+
+      /* spectra */
+      var right = el("div");
+      grid.appendChild(right);
+      var isDecay = rec.family === "decay-photon";
+      var specs = isDecay ? [] : spectrumSpecs(rec, loaded);
+      var hasDecay = isDecay && Object.keys(loaded).some(function (c) {
+        return (loaded[c].results.spectra || []).length;
+      });
+      if (specs.length || hasDecay) {
+        ensurePlotly().then(function () {
+          specs.forEach(function (spec) {
+            var panel = el("div", "panel");
+            var div = el("div", "plot-div");
+            panel.appendChild(div);
+            right.appendChild(panel);
+            var cap = spec.capToSource ? sourceEnergy(loaded) : null;
+            spectrumFigure(div, spec.title + " — " + rec.item, spec.bins, spec.series,
+                           cap || spec.bins[spec.bins.length - 1] * 1.1);
+          });
+          if (hasDecay) {
+            var panel = el("div", "panel");
+            var div = el("div", "plot-div");
+            panel.appendChild(div);
+            right.appendChild(panel);
+            var binsCode = Object.keys(loaded).sort()[0];
+            decaySpectrumFigure(div, "Decay photon spectra — " + rec.item,
+                                loaded[binsCode].results.energy_bins, loaded);
+          }
+        }).catch(function (err) {
+          right.appendChild(el("p", "error", err.message + " — spectra cannot be plotted."));
+        });
+      } else if (!rec.family.startsWith("transmutation")) {
+        right.appendChild(el("p", "note", "No spectra in the cached results."));
+      }
+
+      /* reaction-rate / scalar tally tables */
+      [["tallies", "tally_std", "Reaction rates"],
+       ["n_scalars", "n_stds", "Neutron tallies"],
+       ["p_scalars", "p_stds", "Photon tallies"]].forEach(function (spec) {
+        var t = tallyTable(loaded, spec[0], spec[1]);
+        if (t) {
+          var panel = el("div", "panel");
+          panel.style.marginTop = "12px";
+          panel.appendChild(el("h3", null, spec[2]));
+          panel.appendChild(t);
+          box.appendChild(panel);
+        }
+      });
+
+      /* transmutation step densities */
+      if (rec.family.startsWith("transmutation")) {
+        var tp = transmutationSection(rec, loaded);
+        tp.style.marginTop = "12px";
+        box.appendChild(tp);
+      }
+    });
+  }
+
+  /* ---------- benchmark detail: expansion mechanics ---------- */
+
+  var openDetail = null;
+  function closeDetail() {
+    if (!openDetail) return;
+    /* responsive plotly plots register window listeners removed only by purge */
+    if (window.Plotly) {
+      Array.prototype.forEach.call(
+        openDetail.detailTr.querySelectorAll(".plot-div"),
+        function (div) { try { window.Plotly.purge(div); } catch (e) { /* not a plot */ } });
+    }
+    openDetail.detailTr.remove();
+    openDetail.tr.classList.remove("expanded");
+    var btn = openDetail.tr.querySelector(".expander");
+    if (btn) {
+      btn.setAttribute("aria-expanded", "false");
+      btn.textContent = "▸";
+    }
+    openDetail = null;
+  }
+  function toggleDetail(rec, tr) {
+    var wasOpen = openDetail && openDetail.id === rec.id;
+    closeDetail();
+    if (wasOpen) return;
+    var dtr = document.createElement("tr");
+    dtr.className = "detail-row";
+    var td = document.createElement("td");
+    td.colSpan = COLUMNS.length;
+    var boxEl = el("div", "detail");
+    td.appendChild(boxEl);
+    dtr.appendChild(td);
+    tr.parentNode.insertBefore(dtr, tr.nextSibling);
+    tr.classList.add("expanded");
+    var btn = tr.querySelector(".expander");
+    if (btn) {
+      btn.setAttribute("aria-expanded", "true");
+      btn.textContent = "▾";
+    }
+    openDetail = { id: rec.id, tr: tr, detailTr: dtr };
+    renderDetail(boxEl, rec);
   }
 
   /* ---------- top-level render ---------- */
@@ -681,6 +1400,7 @@
   function render() {
     /* re-render replaces tooltip targets, so a resting pointer would strand it */
     $("tooltip").style.display = "none";
+    closeDetail();
     FILTER_FIELDS.forEach(rebuildSelect);
     var recs = filtered();
     var pairs = comparisons(recs);

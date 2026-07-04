@@ -218,8 +218,9 @@ __marimo__/
 *.xml
 *.h5
 *.html
-# ...but the benchmark database page is a source file, not build output
+# ...but the benchmark database page + its geometry viewers are source files
 !web/benchmarks.html
+!web/models/*.html
 
 # Generated reduced transmutation chains (regenerated per notebook run)
 *.chain.arrow
