@@ -20,6 +20,7 @@
     --q-good: #2a78d6;
     --q-fair: #fab219;
     --q-poor: #d03b3b;
+    --q-expected: #4a3aa7;
     --hover-wash: rgba(11, 11, 11, 0.04);
   }
   @media (prefers-color-scheme: dark) {
@@ -35,6 +36,7 @@
       --accent: #3987e5;
       --hist-bar: #9085e9;
       --q-good: #3987e5;
+      --q-expected: #9085e9;
       --hover-wash: rgba(255, 255, 255, 0.06);
     }
   }
@@ -394,12 +396,22 @@
     "yamc": "YAMC CPU"
   };
   var QUALITIES = ["Excellent", "Good", "Fair", "Poor"];
+  var EXPECTED = "Expected differences";
+  // display bands shown in the quality bar/legend: the four agreement grades
+  // plus the physics-driven "Expected differences" category (its own hue, off
+  // the green-to-red severity ramp, since it is not "worse than Poor").
+  var BANDS = QUALITIES.concat([EXPECTED]);
   var QCOLOR = {
     "Excellent": "var(--q-excellent)",
     "Good": "var(--q-good)",
     "Fair": "var(--q-fair)",
-    "Poor": "var(--q-poor)"
+    "Poor": "var(--q-poor)",
+    "Expected differences": "var(--q-expected)"
   };
+  // the display band for a comparison: the physics-driven category when set,
+  // else its numeric agreement grade.
+  function band(c) { return c.category || c.quality; }
+  function isExpected(c) { return band(c) === EXPECTED; }
   var HIST_EDGES = [0, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, Infinity];
   var FILTER_FIELDS = ["family", "geometry", "library", "element", "item"];
   var FIELD_LABEL = function (field, value) {
@@ -490,8 +502,11 @@
     return out;
   }
 
-  /* severity: quality band first, then chi2, then worst rel diff (mirrors the index builder) */
+  /* severity: quality band first, then chi2, then worst rel diff (mirrors the index builder).
+     Expected differences are physics-driven, not mismatches, so they sort below Poor
+     (as a neutral band) rather than topping the worst-first order. */
   function severity(c) {
+    if (isExpected(c)) return 0.5e12;  // between "no comparison" and Excellent
     var q = QUALITIES.indexOf(c.quality);
     var chi2 = num(c.reduced_chi_squared) || 0;
     var rd = num(c.max_tally_rel_diff_pct);
@@ -549,52 +564,61 @@
     recs.forEach(function (r) { sims += r.codes.length; });
     pairs.forEach(function (p) { floats += p.cmp.floats_compared || 0; });
 
-    var devs = pairs.map(function (p) { return num(p.cmp.weighted_avg_rel_diff_pct); })
-                    .filter(function (v) { return v !== null; })
-                    .sort(function (a, b) { return a - b; });
+    // deviation stats exclude Expected differences (physics-driven, not disagreement)
+    var graded = pairs.filter(function (p) { return !isExpected(p.cmp); });
+    var devs = graded.map(function (p) { return num(p.cmp.weighted_avg_rel_diff_pct); })
+                     .filter(function (v) { return v !== null; })
+                     .sort(function (a, b) { return a - b; });
     var median = quantile(devs, 0.5), p90 = quantile(devs, 0.9), max = devs.length ? devs[devs.length - 1] : null;
+    var nExp = pairs.length - graded.length;
 
     box.appendChild(tile("Simulations", fmtInt(sims), "one cached run of one code"));
     box.appendChild(tile("Benchmarks", fmtInt(recs.length), "type × geometry × library × item"));
-    box.appendChild(tile("Paired comparisons", fmtInt(pairs.length), "OpenMC + YAMC both cached"));
+    box.appendChild(tile("Paired comparisons", fmtInt(pairs.length),
+      nExp ? "OpenMC + YAMC both cached (" + nExp + " expected differences)" : "OpenMC + YAMC both cached"));
     box.appendChild(tile("Floats compared", fmtInt(floats), "spectrum bins, tallies, densities"));
     box.appendChild(tile("Median deviation", median === null ? "n/a" : fmtPct(median),
-      median === null ? "no comparisons in selection"
-                      : deviationLabel(pairs) + " · p90 " + fmtPct(p90) + " · max " + fmtPct(max)));
+      median === null ? "no graded comparisons in selection"
+                      : deviationLabel(graded) + " · p90 " + fmtPct(p90) + " · max " + fmtPct(max)));
   }
 
   /* ---------- quality stacked bar ---------- */
 
   function renderQuality(pairs) {
-    var counts = { Excellent: 0, Good: 0, Fair: 0, Poor: 0 };
+    var counts = {};
+    BANDS.forEach(function (b) { counts[b] = 0; });
     pairs.forEach(function (p) {
-      if (counts[p.cmp.quality] !== undefined) counts[p.cmp.quality]++;
+      var b = band(p.cmp);
+      if (counts[b] !== undefined) counts[b]++;
     });
-    var total = QUALITIES.reduce(function (s, q) { return s + counts[q]; }, 0);
+    var total = BANDS.reduce(function (s, b) { return s + counts[b]; }, 0);
 
     var bar = $("qbar");
     bar.textContent = "";
-    bar.setAttribute("aria-label", QUALITIES.map(function (q) { return counts[q] + " " + q; }).join(", "));
+    bar.setAttribute("aria-label", BANDS.map(function (b) { return counts[b] + " " + b; }).join(", "));
     if (total > 0) {
-      QUALITIES.forEach(function (q) {
-        if (!counts[q]) return;
+      BANDS.forEach(function (b) {
+        if (!counts[b]) return;
         var seg = el("div", "seg");
-        seg.style.width = (100 * counts[q] / total) + "%";
-        seg.style.background = QCOLOR[q];
-        attachTip(seg, function () { return { strong: counts[q] + " " + q.toLowerCase(), rest: fmtPct(100 * counts[q] / total) + " of comparisons" }; });
+        seg.style.width = (100 * counts[b] / total) + "%";
+        seg.style.background = QCOLOR[b];
+        attachTip(seg, (function (bb) {
+          return function () { return { strong: counts[bb] + " " + bb.toLowerCase(), rest: fmtPct(100 * counts[bb] / total) + " of comparisons" }; };
+        })(b));
         bar.appendChild(seg);
       });
     }
 
     var legend = $("qlegend");
     legend.textContent = "";
-    QUALITIES.forEach(function (q) {
+    BANDS.forEach(function (b) {
+      if (b === EXPECTED && !counts[b]) return;  // only show the extra band when present
       var key = el("span", "key");
       var dot = el("span", "dot");
-      dot.style.background = QCOLOR[q];
+      dot.style.background = QCOLOR[b];
       key.appendChild(dot);
-      key.appendChild(el("span", null, q + " "));
-      key.appendChild(el("strong", null, String(counts[q])));
+      key.appendChild(el("span", null, b + " "));
+      key.appendChild(el("strong", null, String(counts[b])));
       legend.appendChild(key);
     });
   }
@@ -613,6 +637,7 @@
     for (var i = 0; i < HIST_EDGES.length - 1; i++) bins.push(0);
     var n = 0;
     pairs.forEach(function (p) {
+      if (isExpected(p.cmp)) return;  // expected differences are not graded on this scale
       var v = num(p.cmp.weighted_avg_rel_diff_pct);
       if (v === null) return;
       n++;
@@ -643,7 +668,7 @@
       axis.appendChild(el("span", null, binLabel(i)));
     });
     $("hist-sub").textContent = "Relative difference per comparison (%), " +
-      deviationLabel(pairs) + ", n = " + n;
+      deviationLabel(pairs.filter(function (p) { return !isExpected(p.cmp); })) + ", n = " + n;
   }
 
   /* ---------- tooltip ---------- */
@@ -713,15 +738,23 @@
         td.appendChild(el("span", "dim", "n/a"));
         return;
       }
+      var b = band(c);
       var badge = el("span", "badge");
       var dot = el("span", "dot");
-      dot.style.background = QCOLOR[c.quality] || "var(--baseline)";
+      dot.style.background = QCOLOR[b] || "var(--baseline)";
       badge.appendChild(dot);
-      badge.appendChild(el("span", null, c.quality || "n/a"));
+      badge.appendChild(el("span", null, b || "n/a"));
       td.appendChild(badge);
       var m;
-      if (c.kind === "transmutation") {
+      if (isExpected(c)) {
+        m = c.yamc_over_openmc_flux
+          ? "YAMC " + c.yamc_over_openmc_flux.toFixed(1) + "x flux (D1S daughter gammas)"
+          : "physics-driven (see notes)";
+      } else if (c.kind === "transmutation") {
         m = "rms " + fmtPct(c.weighted_avg_rel_diff_pct) + " · max " + fmtPct(c.max_rel_diff_pct);
+        if (c.expected_extra_nuclides && c.expected_extra_nuclides.length) {
+          m += " · +" + c.expected_extra_nuclides.length + " extra";
+        }
       } else {
         m = "χ² " + fmtChi2(c.reduced_chi_squared) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
       }
@@ -1413,18 +1446,38 @@
       if (rec.comparisons.length) {
         var badges = el("div", "cmp-badges");
         rec.comparisons.forEach(function (c) {
+          var b = band(c);
           var badge = el("span", "badge");
           var dot = el("span", "dot");
-          dot.style.background = QCOLOR[c.quality] || "var(--baseline)";
+          dot.style.background = QCOLOR[b] || "var(--baseline)";
           badge.appendChild(dot);
-          var m = c.kind === "transmutation"
-            ? "rms " + fmtPct(c.weighted_avg_rel_diff_pct) + " · max " + fmtPct(c.max_rel_diff_pct)
-            : "χ² " + fmtChi2(c.reduced_chi_squared) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
+          var m;
+          if (isExpected(c)) {
+            m = c.yamc_over_openmc_flux
+              ? "YAMC emits " + c.yamc_over_openmc_flux.toFixed(1) + "x the decay-photon flux (D1S daughter gammas)"
+              : "physics-driven difference";
+          } else if (c.kind === "transmutation") {
+            m = "rms " + fmtPct(c.weighted_avg_rel_diff_pct) + " · max " + fmtPct(c.max_rel_diff_pct);
+          } else {
+            m = "χ² " + fmtChi2(c.reduced_chi_squared) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
+          }
           badge.appendChild(el("span", null,
-            (CODE_LABEL[c.code] || c.code) + " vs OpenMC: " + (c.quality || "n/a") + " (" + m + ")"));
+            (CODE_LABEL[c.code] || c.code) + " vs OpenMC: " + b + " (" + m + ")"));
           badges.appendChild(badge);
         });
         box.appendChild(badges);
+        // transmutation: nuclides OpenMC's reduced chain cannot produce (chain membership)
+        var extra = [];
+        rec.comparisons.forEach(function (c) {
+          (c.expected_extra_nuclides || []).forEach(function (n) {
+            if (extra.indexOf(n) < 0) extra.push(n);
+          });
+        });
+        if (extra.length) {
+          box.appendChild(el("p", "note",
+            "Expected extra nuclides YAMC produces that lie outside OpenMC's reduced chain (reduce_level " +
+            "boundary, so OpenMC cannot produce them): " + extra.sort(natCompare).join(", ")));
+        }
       }
 
       /* runnable reproducer script */

@@ -41,6 +41,7 @@ from cache_utils import _decode, yamc_fingerprint
 from . import tasks as _tasks
 from .discovery import element_from_nuclide
 from .plotting import calculate_spectral_agreement
+from .reduced_chains import load as load_reduced_chains
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -133,8 +134,37 @@ def _scalar_rel_diffs(omc, ymc):
     return count, worst, worst_name
 
 
-def _compare(task, omc, ymc):
-    """Agreement metrics for one paired (benchmark, backend), or None."""
+EXPECTED = "Expected differences"
+
+
+def _transmutation_extra_nuclides(ymc, reduced_set):
+    """Nuclides YAMC produces (above threshold) that lie outside OpenMC's reduced chain.
+
+    These are the nuclides OpenMC cannot produce by construction at this
+    ``reduce_level`` (chain membership), so they are an expected extra rather
+    than a disagreement. Returns a sorted name list (empty if no sidecar).
+    """
+    if not reduced_set:
+        return []
+    from .families.transmutation import DENSITY_THRESHOLD
+
+    seen = set()
+    for step in ymc.get("steps", []) or []:
+        for name, dens in step.items():
+            if abs(dens) >= DENSITY_THRESHOLD and name not in reduced_set:
+                seen.add(name)
+    return sorted(seen)
+
+
+def _compare(task, omc, ymc, reduced_set=None):
+    """Agreement metrics for one paired (benchmark, backend), or None.
+
+    ``reduced_set`` is OpenMC's reduced-chain nuclide set for this seed (from the
+    reduced_chains sidecar), used to annotate transmutation comparisons with the
+    nuclides OpenMC's reduced chain cannot produce. ``category`` is the display
+    band: the numeric quality normally, or ``EXPECTED`` when the difference is a
+    known physics-driven one (YAMC more complete).
+    """
     if task.family.startswith("transmutation"):
         from .families.transmutation import compare_transmutation_steps
 
@@ -147,19 +177,23 @@ def _compare(task, omc, ymc):
         return {
             "kind": "transmutation",
             "quality": cmp["quality"],
+            "category": cmp["quality"],
             "weighted_avg_rel_diff_pct": cmp["rms_rel_diff_pct"],
             "max_rel_diff_pct": cmp["max_rel_diff_pct"],
             "products_compared": cmp["n_total"],
             "floats_compared": len(cmp["detail_rows"]),
+            "expected_extra_nuclides": _transmutation_extra_nuclides(ymc, reduced_set),
         }
 
     spectra = _compare_spectra(omc, ymc)
     n_scalars, worst_scalar_pct, worst_scalar = _scalar_rel_diffs(omc, ymc)
     if not spectra and not n_scalars:
         return None
+    quality = _worst_quality([s["quality"] for s in spectra])
     out = {
         "kind": "spectrum",
-        "quality": _worst_quality([s["quality"] for s in spectra]),
+        "quality": quality,
+        "category": quality,
         "floats_compared": sum(s["total_bins"] for s in spectra) + n_scalars,
     }
     if spectra:
@@ -169,6 +203,18 @@ def _compare(task, omc, ymc):
             sum(s["weighted_avg_rel_diff"] * w for s, w in zip(spectra, weights)) / sum(weights)
         )
         out["spectra"] = spectra
+        ref_total = sum(s.get("ref_total_flux", 0.0) for s in spectra)
+        oth_total = sum(s.get("other_total_flux", 0.0) for s in spectra)
+        # decay-photon: a diverging comparison is the D1S daughter-gamma difference
+        # (YAMC includes the decay products' gammas, OpenMC's D1S omits them). chi2
+        # is hypersensitive here (tight per-bin stats make any real difference read
+        # as Poor), so a numeric grade is misleading; categorize the divergence as
+        # the expected difference instead. Comparisons that agree keep their grade.
+        if task.family == "decay-photon" and quality in ("Fair", "Poor"):
+            out["category"] = EXPECTED
+            out["expected_reason"] = "d1s-daughter-gammas"
+            if ref_total > 0:
+                out["yamc_over_openmc_flux"] = oth_total / ref_total
     if n_scalars:
         out["max_tally_rel_diff_pct"] = worst_scalar_pct
         out["worst_tally"] = worst_scalar
@@ -223,6 +269,7 @@ def build_index(tasks_list=None, worst_n=15):
         indexed_lib_dirs.add(lib_dir)
         if not lib_dir.is_dir():
             continue
+        reduced_chains = load_reduced_chains(task) if task.family.startswith("transmutation") else None
         code_files = {}
         for code_dir in sorted(p for p in lib_dir.iterdir() if p.is_dir()):
             files = {p.stem: p for p in code_dir.glob("*.json")}
@@ -249,7 +296,8 @@ def build_index(tasks_list=None, worst_n=15):
                     if code == "openmc":
                         continue
                     y_meta, y_res = loaded[code]
-                    cmp = _compare(task, omc_res, y_res)
+                    reduced_set = reduced_chains.get(key) if reduced_chains else None
+                    cmp = _compare(task, omc_res, y_res, reduced_set=reduced_set)
                     if cmp is not None:
                         comparisons.append({
                             "code": code,
@@ -284,7 +332,11 @@ def build_index(tasks_list=None, worst_n=15):
                 unindexed.append(lib_dir.relative_to(_REPO_ROOT).as_posix())
 
     flat = [(r, c) for r in records for c in r["comparisons"]]
-    worst = sorted(flat, key=lambda rc: _mismatch_key(rc[1]), reverse=True)[:worst_n]
+    # Expected-differences comparisons are physics-driven (YAMC more complete), so
+    # they are graded in their own category and kept out of the deviation
+    # distribution and the worst-mismatch list, which are about genuine agreement.
+    graded = [(r, c) for r, c in flat if c.get("category") != EXPECTED]
+    worst = sorted(graded, key=lambda rc: _mismatch_key(rc[1]), reverse=True)[:worst_n]
     index = {
         "schema_version": 1,
         "generated_unix": int(time.time()),
@@ -304,12 +356,13 @@ def build_index(tasks_list=None, worst_n=15):
             "elements": sorted({r["element"] for r in records}),
         },
         "agreement": {
-            "quality_counts": dict(Counter(c["quality"] for _, c in flat if c["quality"])),
+            "quality_counts": dict(Counter(c["category"] for _, c in flat if c.get("category"))),
+            "expected_differences": sum(1 for _, c in flat if c.get("category") == EXPECTED),
             "weighted_avg_rel_diff_pct": _distribution(
-                [c.get("weighted_avg_rel_diff_pct") for _, c in flat]
+                [c.get("weighted_avg_rel_diff_pct") for _, c in graded]
             ),
             "reduced_chi_squared": _distribution(
-                [c.get("reduced_chi_squared") for _, c in flat]
+                [c.get("reduced_chi_squared") for _, c in graded]
             ),
             "worst": [
                 {
