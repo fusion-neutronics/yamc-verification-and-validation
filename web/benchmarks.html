@@ -52,6 +52,27 @@
   header.page a { color: var(--accent); text-decoration: none; }
   header.page a:hover { text-decoration: underline; }
 
+  /* ---- expected-differences callout ---- */
+  .callout {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); border-radius: 8px;
+    margin: 16px 0 4px; padding: 0 14px;
+  }
+  .callout > summary {
+    cursor: pointer; padding: 11px 0; font-size: 13.5px; font-weight: 600;
+    color: var(--ink); list-style: none;
+  }
+  .callout > summary::-webkit-details-marker { display: none; }
+  .callout > summary::before { content: "▸ "; color: var(--muted); }
+  .callout[open] > summary::before { content: "▾ "; }
+  .callout .body { padding: 0 0 12px; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+  .callout .body h4 { margin: 10px 0 3px; font-size: 12.5px; color: var(--ink); }
+  .callout .body p { margin: 0 0 8px; }
+  .callout .body code {
+    background: var(--page); border: 1px solid var(--border); border-radius: 4px;
+    padding: 0 4px; font-size: 12px;
+  }
+
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -234,10 +255,46 @@
 <main>
   <header class="page">
     <h1>Benchmark database</h1>
-    <p>Every cached verification simulation, filterable by what it models — with
+    <p>Every cached verification simulation, filterable by what it models, with
        YAMC-vs-OpenMC agreement wherever a paired result exists.
        <a href="./">&#8592; Verification book</a></p>
   </header>
+
+  <details class="callout">
+    <summary>Expected differences between YAMC and OpenMC</summary>
+    <div class="body">
+      <p>Some benchmarks show a difference that is <em>expected</em>: it comes from a
+         methodological choice, not from either code being wrong. Read these before
+         treating a disagreement as an error.</p>
+
+      <h4>Depletion chain reduction (transmutation benchmarks)</h4>
+      <p>YAMC and OpenMC interpret the depletion "reduce" level differently, so
+         low-density nuclides can differ. YAMC's <code>reduce_transport_chain</code>
+         bounds <em>only</em> which product nuclides get cross sections loaded for
+         neutron transport; the burnup (Bateman) equations are always solved on the
+         <em>full</em> decay network. That solve is cheap (sparse CRAM) and exact, so
+         nothing is saved by trimming it and no accuracy is lost by keeping it.
+         OpenMC's <code>Chain.reduce</code> instead prunes the <em>whole</em> network
+         (transport, decay, and the Bateman matrix together), so at a low level it drops
+         decay-fed nuclides entirely.</p>
+      <p>The consequence is analytic, not a coincidence: any nuclide that appears in
+         YAMC's result but lies <em>outside</em> OpenMC's reduced chain is one OpenMC
+         cannot produce by construction. Where the codes disagree on such a
+         low-density, decay-fed nuclide, <strong>YAMC is the more complete result and
+         OpenMC has truncated a real decay pathway</strong>. It is not YAMC being
+         wrong. The dominant, physically significant nuclides agree closely; the
+         disagreements sit orders of magnitude below them.</p>
+
+      <h4>Shutdown dose rate / decay photons (D1S benchmarks)</h4>
+      <p>For decay-gamma and shutdown-dose-rate benchmarks, YAMC's D1S (Direct-1-Step)
+         also emits the decay gammas of the <em>decay products</em>: it follows the
+         activation daughters down the chain and includes their decay photons. OpenMC's
+         D1S attributes decay gammas only to the directly activated nuclide and misses
+         the gammas emitted by those subsequent decay products. Expect YAMC to show
+         additional decay-photon flux and lines from the daughter nuclides; that extra
+         signal is real physics OpenMC's D1S omits.</p>
+    </div>
+  </details>
 
   <div id="app" hidden>
     <section class="filters" aria-label="Filters">
@@ -361,12 +418,12 @@
     return n.toLocaleString("en-US");
   }
   function fmtPct(v) {
-    if (v === null || v === undefined || !isFinite(v)) return "—";
+    if (v === null || v === undefined || !isFinite(v)) return "n/a";
     if (v >= 100) return v.toFixed(0) + "%";
     return (v >= 10 ? v.toFixed(1) : v.toFixed(2)) + "%";
   }
   function fmtChi2(v) {
-    if (v === null || v === undefined || !isFinite(v)) return "—";
+    if (v === null || v === undefined || !isFinite(v)) return "n/a";
     return v >= 100 ? v.toFixed(0) : v.toFixed(2);
   }
   function quantile(sorted, q) {
@@ -488,7 +545,7 @@
     box.appendChild(tile("Benchmarks", fmtInt(recs.length), "type × geometry × library × item"));
     box.appendChild(tile("Paired comparisons", fmtInt(pairs.length), "OpenMC + YAMC both cached"));
     box.appendChild(tile("Floats compared", fmtInt(floats), "spectrum bins, tallies, densities"));
-    box.appendChild(tile("Median deviation", median === null ? "—" : fmtPct(median),
+    box.appendChild(tile("Median deviation", median === null ? "n/a" : fmtPct(median),
       median === null ? "no comparisons in selection"
                       : deviationLabel(pairs) + " · p90 " + fmtPct(p90) + " · max " + fmtPct(max)));
   }
@@ -640,7 +697,7 @@
       td.className = "qcell";
       var c = cmpFor(r, code);
       if (!c) {
-        td.appendChild(el("span", "dim", "—"));
+        td.appendChild(el("span", "dim", "n/a"));
         return;
       }
       var badge = el("span", "badge");
@@ -1337,7 +1394,7 @@
           perf.push((CODE_LABEL[c] || c) + ": " + r.time_s.toFixed(1) + " s depletion");
         }
       });
-      if (perf.length) box.appendChild(el("p", "perf", "Performance — " + perf.join("  ·  ")));
+      if (perf.length) box.appendChild(el("p", "perf", "Performance: " + perf.join("  ·  ")));
 
       /* agreement badges from the index */
       if (rec.comparisons.length) {
@@ -1379,7 +1436,7 @@
             panel.appendChild(div);
             right.appendChild(panel);
             var cap = spec.capToSource ? sourceEnergy(loaded) : null;
-            spectrumFigure(div, spec.title + " — " + rec.item, spec.bins, spec.series,
+            spectrumFigure(div, spec.title + ": " + rec.item, spec.bins, spec.series,
                            cap || spec.bins[spec.bins.length - 1] * 1.1);
           });
           if (hasDecay) {
@@ -1388,11 +1445,11 @@
             panel.appendChild(div);
             right.appendChild(panel);
             var binsCode = Object.keys(loaded).sort()[0];
-            decaySpectrumFigure(div, "Decay photon spectra — " + rec.item,
+            decaySpectrumFigure(div, "Decay photon spectra: " + rec.item,
                                 loaded[binsCode].results.energy_bins, loaded);
           }
         }).catch(function (err) {
-          right.appendChild(el("p", "error", err.message + " — spectra cannot be plotted."));
+          right.appendChild(el("p", "error", err.message + " (spectra cannot be plotted)."));
         });
       } else if (!rec.family.startsWith("transmutation")) {
         right.appendChild(el("p", "note", "No spectra in the cached results."));
@@ -1428,7 +1485,7 @@
         frame.title = "Interactive geometry viewer (" + rec.geometry + ")";
         geoPanel.appendChild(frame);
         geoPanel.appendChild(el("p", "note",
-          "xz slice — the geometry is identical for every " + rec.item_kind + " in this task; " +
+          "xz slice: the geometry is identical for every " + rec.item_kind + " in this task; " +
           "only the material composition changes."));
       } else {
         geoPanel.appendChild(el("p", "note",
@@ -1550,7 +1607,7 @@
       p.appendChild(el("code", null, "python -m yamc_verify.index_builder --out benchmarks-index.json"));
       p.appendChild(document.createTextNode(" beside this file and serve the directory over HTTP ("));
       p.appendChild(el("code", null, "python -m http.server"));
-      p.appendChild(document.createTextNode(") — fetch does not work from file://."));
+      p.appendChild(document.createTextNode("); fetch does not work from file://."));
       box.appendChild(p);
     });
 })();
