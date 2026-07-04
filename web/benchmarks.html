@@ -878,7 +878,9 @@
       });
       var name = s.label + " / " + ref.label;
       var xy = stepXY(bins, r);
+      /* ratio traces carry their own legend, anchored over the ratio subplot */
       traces.push({ x: xy.x, y: xy.y, mode: "lines", name: name, yaxis: "y2",
+                    legend: "legend2",
                     line: { color: RATIO_COLORS[name] || "green", width: 2 } });
     });
 
@@ -900,6 +902,8 @@
       layout.yaxis2 = Object.assign({}, ax, {
         title: { text: "Ratio" }, range: [0.5, 1.5], domain: [0, 0.3]
       });
+      /* second legend sits at the top of the ratio panel */
+      layout.legend2 = { x: 0.02, y: 0.30, xanchor: "left", yanchor: "top", bgcolor: "rgba(0,0,0,0)" };
       layout.shapes = [{ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2",
                          y0: 1, y1: 1, line: { color: "gray", dash: "dash", width: 1 } }];
       layout.height = 560;
