@@ -12,7 +12,7 @@ state stays simple. The layout mirrors issue #29::
         yamc-gpu - 20/50 cached 30/50 completed 5 mins
         openmc - 50/50 cached
     photon sphere
-        yamc-cpu - 30/50 ETA 9 mins  <--- in progress
+        yamc-cpu - 30/50 running Fe ETA 9 mins  <--- in progress
         yamc-gpu - 50/50 todo
         openmc - 50/50 cached
 
@@ -98,8 +98,17 @@ def _code_line(code, now, global_avg):
         else:
             body = f"{done}/{total}"
         eta = _code_eta(code, global_avg)
-        tail = f"ETA {humanize(eta)}" if eta is not None else "running"
-        return f"{body} {tail}  <--- in progress"
+        # Name the item currently simulating when one is known (set between an
+        # item_start and its completion; cached items are instant and set none).
+        running_key = code.get("running_key")
+        parts = [body]
+        if running_key:
+            parts.append(f"running {running_key}")
+        if eta is not None:
+            parts.append(f"ETA {humanize(eta)}")
+        elif not running_key:
+            parts.append("running")
+        return " ".join(parts) + "  <--- in progress"
 
     # done
     elapsed = None

@@ -86,6 +86,22 @@ def _cache_info(cache_dir, library, code, key, meta):
     return valid, (float(elapsed) if isinstance(elapsed, (int, float)) else None)
 
 
+def real_codes(base_codes: list[str], task: Task) -> list[str]:
+    """Real cache/progress code labels for ``task``, in display order.
+
+    Secondary-photon runs each backend once per electron treatment and stores
+    and reports the result under a treatment-suffixed code (``openmc-led``,
+    ``yamc-cpu-ttb``, ...), exactly as :func:`secondary_photon.run_all` builds
+    them. Every other family uses the backend code unchanged. Keeping this in
+    step with the family is what lets the live progress events land on the
+    matching dashboard row instead of being dropped as unknown codes.
+    """
+    treatments = task.extras.get("electron_treatments")
+    if not treatments:
+        return list(base_codes)
+    return [f"{base}-{t}" for base in base_codes for t in treatments]
+
+
 def _code_meta(code: str, library: str, fingerprint: dict) -> dict:
     """Minimal cache-validity meta for the up-front estimate.
 
@@ -107,7 +123,7 @@ def build_state(tasks: list[Task], backends: Backends) -> dict:
         "tasks": [],
     }
     for task in tasks:
-        codes = [c for c in task.codes if code_enabled(c, backends)]
+        codes = real_codes([c for c in task.codes if code_enabled(c, backends)], task)
         try:
             items = discover_items(task, backends.run_openmc)
         except Exception:
