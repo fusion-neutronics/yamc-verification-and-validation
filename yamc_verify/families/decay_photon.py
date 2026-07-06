@@ -130,6 +130,9 @@ def run_openmc_d1s(nuclide, neutron_path, element, photon_path, task: Task):
 
 def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, compute="cpu"):
     """Run YAMC D1S simulation. Returns (results_dict, model)."""
+    import shutil
+    import tempfile
+
     import yamc as mc
 
     transmutation_data = discovery.transmutation_data_path(task.library)
@@ -157,69 +160,82 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
     )
 
     # Reduce the YAMC transmutation network to nuclides reachable from the seed
-    # (matches OpenMC's chain.reduce(...)); export to a local arrow dir and point
-    # the global at it so radionuclides()/decay-photon channels pick it up.
+    # (matches OpenMC's chain.reduce(...)); export to an arrow dir and point the
+    # global at it so radionuclides()/decay-photon channels pick it up.
+    #
+    # The export path MUST be unique per nuclide: yamc caches the transmutation
+    # chain by path, so reusing one path (as this once did) made every nuclide
+    # after the first silently reuse the first nuclide's reduced chain.
+    # radionuclides() then resolved this material's activation products against
+    # the wrong chain and came back empty, zeroing the decay-photon result. A
+    # fresh temp dir per nuclide sidesteps the cache; it is removed once the
+    # tally is time-corrected (the global chain is needed through that call).
     yamc_chain = mc.TransmutationChain(transmutation_data)
     yamc_reduced = yamc_chain.reduce([nuclide], level=reduce_level)
-    reduced_path = os.path.join(os.getcwd(), '_reduced_transmutation.chain.arrow')
+    reduced_dir = tempfile.mkdtemp(prefix="yamc_d1s_reduced_")
+    reduced_path = os.path.join(reduced_dir, "reduced.chain.arrow")
     yamc_reduced.export_to_arrow(reduced_path)
     mc.transmutation_data = reduced_path
 
-    # Unstable activation products reachable from this model's materials.
-    radionuclides = mc.Model(
-        geometry=geometry, source=source, verbose=[],
-    ).radionuclides()
+    try:
+        # Unstable activation products reachable from this model's materials.
+        radionuclides = mc.Model(
+            geometry=geometry, source=source, verbose=[],
+        ).radionuclides()
 
-    tally = mc.Tally(
-        scores=['flux'],
-        name='d1s_spectrum',
-        cells=cell,
-        particle='photon',
-        energy_group_structure=task.extras["photon_group_structure"],
-        parent_nuclides=radionuclides,
-    )
+        tally = mc.Tally(
+            scores=['flux'],
+            name='d1s_spectrum',
+            cells=cell,
+            particle='photon',
+            energy_group_structure=task.extras["photon_group_structure"],
+            parent_nuclides=radionuclides,
+        )
 
-    energy_bins = np.array(tally.energy_bins)
+        energy_bins = np.array(tally.energy_bins)
 
-    model = mc.Model(
-        geometry=geometry,
-        tallies=[tally],
-        source=source,
-        transport_secondary_photons=True,
-        use_decay_photons=True,
-        verbose=[],
-    )
+        model = mc.Model(
+            geometry=geometry,
+            tallies=[tally],
+            source=source,
+            transport_secondary_photons=True,
+            use_decay_photons=True,
+            verbose=[],
+        )
 
-    t0 = time.time()
-    dp = model.simulate_transport(
-        total_particles=task.particles * task.batches,
-        seed=1,
-        compute=compute,
-    )[tally]
-    elapsed = time.time() - t0
+        t0 = time.time()
+        dp = model.simulate_transport(
+            total_particles=task.particles * task.batches,
+            seed=1,
+            compute=compute,
+        )[tally]
+        elapsed = time.time() - t0
 
-    # Build the irradiation/cooling schedule (Pulse for irrad, Cooldown for cool)
-    # and time-correct the parent-nuclide-binned photon tally into a DoseResult.
-    schedule_steps = []
-    for dt, rate in zip(timesteps, source_rates):
-        if rate > 0:
-            schedule_steps.append(mc.Pulse(source=source, rate=rate, duration=dt))
-        else:
-            schedule_steps.append(mc.Cooldown(duration=dt))
-    schedule = mc.PulseSchedule(schedule_steps)
-    dose = schedule.time_correct_tally(dp)
+        # Build the irradiation/cooling schedule (Pulse for irrad, Cooldown for
+        # cool) and time-correct the parent-nuclide-binned photon tally into a
+        # DoseResult.
+        schedule_steps = []
+        for dt, rate in zip(timesteps, source_rates):
+            if rate > 0:
+                schedule_steps.append(mc.Pulse(source=source, rate=rate, duration=dt))
+            else:
+                schedule_steps.append(mc.Cooldown(duration=dt))
+        schedule = mc.PulseSchedule(schedule_steps)
+        dose = schedule.time_correct_tally(dp)
 
-    spectra = [list(row) for row in np.array(dose.mean)]
-    spectra_std = [list(row) for row in np.array(dose.std_dev)]
+        spectra = [list(row) for row in np.array(dose.mean)]
+        spectra_std = [list(row) for row in np.array(dose.std_dev)]
 
-    return {
-        'backend': f'yamc-{compute}',
-        'radionuclides': radionuclides,
-        'energy_bins': energy_bins,
-        'spectra': spectra,
-        'spectra_std': spectra_std,
-        'elapsed': elapsed,
-    }, model
+        return {
+            'backend': f'yamc-{compute}',
+            'radionuclides': radionuclides,
+            'energy_bins': energy_bins,
+            'spectra': spectra,
+            'spectra_std': spectra_std,
+            'elapsed': elapsed,
+        }, model
+    finally:
+        shutil.rmtree(reduced_dir, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------
