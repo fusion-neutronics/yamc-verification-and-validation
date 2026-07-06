@@ -16,17 +16,22 @@ The module is imported by the notebooks under ``tasks/`` to avoid re-running
 simulations every notebook session. OpenMC reference results are keyed by run
 parameters only (OpenMC is fixed); YAMC results additionally fold
 :func:`yamc_fingerprint` into their metadata, so the cache auto-invalidates and
-the simulation re-runs whenever the installed yamc version or git commit
-changes.
+the simulation re-runs whenever the installed yamc version or compiled core
+(``_core*.so``) changes. Set ``YAMC_VERIFY_ACCEPT_OLD_CACHE=1`` to accept
+previously cached YAMC results regardless of which build produced them.
 """
 
 from __future__ import annotations
 
+import functools
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 import numpy as np
+
+ACCEPT_OLD_CACHE_ENV = "YAMC_VERIFY_ACCEPT_OLD_CACHE"
 
 
 def _progress():
@@ -259,45 +264,62 @@ def select_requested(items, *, kind, key=None, stable_getter=None):
     return result
 
 
-def _yamc_git_commit() -> Optional[str]:
-    """Short git commit of the installed yamc source, or ``None``.
+@functools.lru_cache(maxsize=1)
+def _yamc_core_hash() -> Optional[str]:
+    """Short content hash of the compiled yamc core (``_core*.so``), or ``None``.
 
-    Only meaningful for an editable / source install where ``yamc.__file__``
-    lives inside a git checkout (the usual yamc development setup); returns
-    ``None`` for a packaged wheel install with no surrounding repository.
+    Identifies the actual binary in use: it changes when the extension is
+    rebuilt (``maturin develop``) but NOT when a git checkout, merge, or pull
+    moves the source repo's HEAD without touching the binary. That is the whole
+    point of keying on the artifact rather than the commit, so a no-op merge no
+    longer invalidates every cached YAMC result. ``None`` when no compiled
+    extension can be found (e.g. a pure-Python stand-in).
     """
     try:
-        import subprocess
+        import glob
+        import hashlib
 
         import yamc
 
-        src = Path(yamc.__file__).resolve()
-        for parent in src.parents:
-            if (parent / ".git").exists():
-                out = subprocess.run(
-                    ["git", "-C", str(parent), "rev-parse", "--short", "HEAD"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                return out.stdout.strip() if out.returncode == 0 else None
-        return None
+        pkg = os.path.dirname(yamc.__file__)
+        sos = sorted(glob.glob(os.path.join(pkg, "**", "*.so"), recursive=True))
+        if not sos:
+            return None
+        h = hashlib.sha256()
+        for so in sos:
+            h.update(os.path.relpath(so, pkg).encode())  # name, so an added/renamed ext shows up
+            with open(so, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+        return h.hexdigest()[:12]
     except Exception:
         return None
+
+
+def _accept_old_cache() -> bool:
+    """Whether ``YAMC_VERIFY_ACCEPT_OLD_CACHE`` opts out of build-based invalidation."""
+    return os.environ.get(ACCEPT_OLD_CACHE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def yamc_fingerprint() -> dict:
     """Identity of the installed yamc, for cache invalidation.
 
-    Returns ``{"yamc_version": yamc.__version__, "yamc_commit": ...}``. Fold
+    Returns ``{"yamc_version": yamc.__version__, "yamc_core_sha": ...}``. Fold
     this into the ``meta`` of a YAMC cache entry so the cache invalidates
-    automatically (and the simulation re-runs) whenever the installed yamc
-    changes: a new released version, or a new git commit for an editable /
-    source install. The version string does not bump per development build, so
-    the commit is what catches day-to-day changes. The commit is ``None`` for a
-    packaged wheel install with no surrounding git checkout, leaving the version
-    as the invalidation key.
+    automatically (and the simulation re-runs) whenever the *compiled* yamc core
+    changes. Keying on a content hash of ``_core*.so`` (rather than the git
+    commit) means a checkout / merge / pull that leaves the binary untouched
+    keeps the cache valid, while a real ``maturin develop`` rebuild invalidates
+    it. ``yamc_core_sha`` is ``None`` when no compiled extension is found,
+    leaving the version as the invalidation key.
+
+    When ``YAMC_VERIFY_ACCEPT_OLD_CACHE`` is set this returns ``{}``, so YAMC
+    results are keyed by run parameters only and any previously cached result is
+    accepted regardless of which build produced it. Use it when you know the
+    current binary matches the cached results and want to skip a recompute.
     """
+    if _accept_old_cache():
+        return {}
     import yamc
 
-    return {"yamc_version": yamc.__version__, "yamc_commit": _yamc_git_commit()}
+    return {"yamc_version": yamc.__version__, "yamc_core_sha": _yamc_core_hash()}

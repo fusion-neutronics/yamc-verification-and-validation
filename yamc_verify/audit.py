@@ -62,10 +62,10 @@ def _cached_keys(cache_dir, library, code):
     return {os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(d, "*.json"))}
 
 
-def _yamc_commit(cache_dir, library, code, key):
+def _yamc_core_sha(cache_dir, library, code, key):
     try:
         with open(_cache_path(cache_dir, library, code, key)) as f:
-            return json.load(f).get("_meta", {}).get("yamc_commit")
+            return json.load(f).get("_meta", {}).get("yamc_core_sha")
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -86,7 +86,7 @@ def _max_tally_reldiff(openmc, yamc):
 
 def audit(tasks_list=None, *, current_only=False):
     """Return (rows, unauditable) where rows are per (task, nuclide, backend)."""
-    fp_commit = yamc_fingerprint().get("yamc_commit")
+    fp_sha = yamc_fingerprint().get("yamc_core_sha")
     tasks_list = tasks_list or _tasks.all_tasks()
     rows: list[Row] = []
     unauditable: list[str] = []
@@ -99,7 +99,7 @@ def audit(tasks_list=None, *, current_only=False):
         omc_keys = _cached_keys(t.cache_dir, t.library, "openmc")
         for backend in yamc_codes:
             for key in sorted(omc_keys & _cached_keys(t.cache_dir, t.library, backend)):
-                stale = _yamc_commit(t.cache_dir, t.library, backend, key) != fp_commit
+                stale = _yamc_core_sha(t.cache_dir, t.library, backend, key) != fp_sha
                 if current_only and stale:
                     continue
                 omc = load_cached(t.cache_dir, t.library, "openmc", key)

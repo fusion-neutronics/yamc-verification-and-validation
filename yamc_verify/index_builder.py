@@ -330,7 +330,7 @@ def build_index(tasks_list=None, worst_n=15):
                             "code": code,
                             "treatment": treatment or None,
                             "yamc_version": y_meta.get("yamc_version"),
-                            "yamc_commit": y_meta.get("yamc_commit"),
+                            "yamc_core_sha": y_meta.get("yamc_core_sha"),
                             **cmp,
                         })
             records.append({

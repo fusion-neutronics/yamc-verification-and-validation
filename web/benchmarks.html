@@ -1735,7 +1735,7 @@
     var bits = [];
     if (when) bits.push("Index generated " + when);
     if (idx.yamc && idx.yamc.yamc_version) {
-      bits.push("yamc " + idx.yamc.yamc_version + (idx.yamc.yamc_commit ? " (" + idx.yamc.yamc_commit + ")" : ""));
+      bits.push("yamc " + idx.yamc.yamc_version + (idx.yamc.yamc_core_sha ? " (" + idx.yamc.yamc_core_sha + ")" : ""));
     }
     bits.push("schema v" + idx.schema_version);
     foot.textContent = bits.join(" · ");
