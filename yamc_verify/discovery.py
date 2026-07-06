@@ -15,7 +15,7 @@ import os
 import re
 from pathlib import Path
 
-from cache_utils import select_requested
+from cache_utils import requested_items, select_requested
 
 _SINGLE_NUCLIDE_RE = re.compile(r"[A-Z][a-z]?\d+")
 
@@ -204,6 +204,24 @@ def discover_d1s_nuclides(nuclear_data_dir: str, library: str, chain_file: str,
         photon_path = os.path.join(photon_dir, f"{element}.h5")
         if os.path.exists(photon_path):
             result.append((name, f, element, photon_path))
+
+    # Explicitly requested nuclides bypass the D1S-signature filter: naming a
+    # nuclide means "run it", even one whose activation products emit no decay
+    # photons (e.g. Li6/Li7). Those yield a legitimate all-zero spectrum rather
+    # than a hard discovery failure. Only add one whose transport + element
+    # photon data exist; a requested nuclide with no data still raises in
+    # select_requested (so typos are still caught).
+    have = {t[0] for t in result}
+    for name in requested_items("nuclide"):
+        if name in have or "_m" in name:
+            continue
+        npath = os.path.join(neutron_dir, f"{name}.h5")
+        element = element_from_nuclide(name)
+        ppath = os.path.join(photon_dir, f"{element}.h5")
+        if os.path.exists(npath) and os.path.exists(ppath):
+            result.append((name, npath, element, ppath))
+            have.add(name)
+
     if not result:
         raise FileNotFoundError("No D1S-relevant nuclides found.")
     return select_requested(result, kind="nuclide", key=lambda t: t[0])
@@ -266,6 +284,21 @@ def discover_stable_nuclides(nuclear_data_dir: str, library: str, chain_file: st
             names.append((name, os.path.join(neutron_dir, f"{name}.h5")) if return_paths else name)
         if not names:
             raise FileNotFoundError(f"No stable nuclides found in yamc chain/cache for {library!r}.")
+
+    # Explicitly requested nuclides bypass the stable-only filter: naming an
+    # (effectively) unstable nuclide such as W180 or W186 means "irradiate it
+    # and report the result", which is valid physics; the stable-only default
+    # is just a scope choice to avoid pulling in fission-yield data. Add a
+    # requested name that has transport data but was filtered out; a requested
+    # name with no data still raises in select_requested.
+    have = {(n[0] if return_paths else n) for n in names}
+    for name in requested_items("nuclide"):
+        if name in have or "_m" in name:
+            continue
+        npath = os.path.join(neutron_dir, f"{name}.h5")
+        if os.path.exists(npath):
+            names.append((name, npath) if return_paths else name)
+            have.add(name)
 
     key = (lambda t: t[0]) if return_paths else None
     return select_requested(names, kind="nuclide", key=key)

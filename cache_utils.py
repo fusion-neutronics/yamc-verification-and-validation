@@ -33,6 +33,9 @@ import numpy as np
 
 ACCEPT_OLD_CACHE_ENV = "YAMC_VERIFY_ACCEPT_OLD_CACHE"
 
+# Explicit-item-list env var per selection kind (see :func:`select_requested`).
+_ITEM_ENV = {"nuclide": "YAMC_VERIFY_NUCLIDES", "element": "YAMC_VERIFY_ELEMENTS"}
+
 
 def _progress():
     """Return the :mod:`yamc_verify.progress` module, or ``None`` if unavailable.
@@ -221,10 +224,7 @@ def select_requested(items, *, kind, key=None, stable_getter=None):
         def key(x):
             return x
 
-    env_name = {
-        "nuclide": "YAMC_VERIFY_NUCLIDES",
-        "element": "YAMC_VERIFY_ELEMENTS",
-    }[kind]
+    env_name = _ITEM_ENV[kind]
 
     raw = os.environ.get(env_name, "").strip()
     if raw:
@@ -262,6 +262,19 @@ def select_requested(items, *, kind, key=None, stable_getter=None):
     if _p:
         _p.report_plan([key(it) for it in result], kind=kind)
     return result
+
+
+def requested_items(kind: str) -> list[str]:
+    """Explicitly requested item names for ``kind`` in request order, or ``[]``.
+
+    Reads the same ``YAMC_VERIFY_NUCLIDES`` / ``YAMC_VERIFY_ELEMENTS`` list that
+    :func:`select_requested` honours. Discovery uses it to add back an
+    explicitly named item that a family's heuristic filter would otherwise drop
+    (e.g. a decay-photon nuclide with no gamma emission, or an unstable
+    transmutation target): naming an item means "run it".
+    """
+    raw = os.environ.get(_ITEM_ENV[kind], "").strip()
+    return [t.strip() for t in raw.split(",") if t.strip()] if raw else []
 
 
 @functools.lru_cache(maxsize=1)
