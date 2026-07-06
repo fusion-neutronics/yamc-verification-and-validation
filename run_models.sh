@@ -28,6 +28,14 @@ export MC_BACKENDS="${MC_BACKENDS:-openmc-cpu}"
 
 # Prefer the repo virtualenv's python; fall back to whatever is on PATH.
 PYTHON=".venv/bin/python"
-[ -x "$PYTHON" ] || PYTHON="python"
+if [ -x "$PYTHON" ]; then
+    # Put the venv's bin on PATH so subprocesses find its console scripts even
+    # when the venv is not activated. In particular OpenMC's model.run() spawns
+    # the `openmc` executable and locates it via PATH; without this, uncached
+    # OpenMC tasks fail with "No such file or directory: 'openmc'".
+    export PATH="$PWD/.venv/bin:$PATH"
+else
+    PYTHON="python"
+fi
 
 exec "$PYTHON" -m yamc_verify.orchestrator "$@"
