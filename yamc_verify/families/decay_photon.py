@@ -24,6 +24,7 @@ from plotly.subplots import make_subplots
 
 from .. import discovery
 from ..geometry import openmc_region, yamc_region
+from ..plotting import BACKEND_STYLES, RATIO_COLORS
 from ..runstep import run_step
 from ..tasks import Task
 
@@ -260,6 +261,12 @@ def create_step_trace(energy_bins, values, name, color, dash=None):
 
 def create_comparison_plot(energy_bins, openmc_flux, openmc_std, yamc_flux, yamc_std, title="Flux", ref_label='OpenMC CPU', yamc_label='YAMC'):
     """Create a Plotly subplot with photon flux spectra (top) and ratio (bottom)."""
+    # Per-backend colours (shared with neutron/photon) so the reference and each
+    # YAMC backend are distinct: this figure is drawn once per (backend, step),
+    # so the yamc series colour is keyed off yamc_label ("YAMC CPU" / "YAMC GPU").
+    omc_style = BACKEND_STYLES.get(ref_label, dict(color="blue", dash=None, marker="circle"))
+    ymc_style = BACKEND_STYLES.get(yamc_label, dict(color="red", dash="dash", marker="square"))
+    ratio_color = RATIO_COLORS.get(f"{yamc_label} / {ref_label}", "green")
 
     energy_bins = np.asarray(energy_bins)
     bin_centers = np.sqrt(energy_bins[:-1] * energy_bins[1:])
@@ -309,19 +316,22 @@ def create_comparison_plot(energy_bins, openmc_flux, openmc_std, yamc_flux, yamc
     )
 
     fig.add_trace(
-        create_step_trace(energy_bins, omc_flux_plot, ref_label, 'blue'),
+        create_step_trace(energy_bins, omc_flux_plot, ref_label, omc_style["color"],
+                          dash=omc_style["dash"]),
         row=1, col=1
     )
     fig.add_trace(
-        create_step_trace(energy_bins, ymc_flux_plot, yamc_label, 'red', dash='dash'),
+        create_step_trace(energy_bins, ymc_flux_plot, yamc_label, ymc_style["color"],
+                          dash=ymc_style["dash"]),
         row=1, col=1
     )
 
     fig.add_trace(
         go.Scatter(
             x=bin_centers, y=omc_flux_plot, mode='markers',
-            marker=dict(color='blue', size=4, symbol='circle'),
-            error_y=dict(type='data', array=omc_std_plot, visible=True, color='blue', thickness=1),
+            marker=dict(color=omc_style["color"], size=4, symbol=omc_style["marker"]),
+            error_y=dict(type='data', array=omc_std_plot, visible=True,
+                         color=omc_style["color"], thickness=1),
             showlegend=False,
         ),
         row=1, col=1
@@ -329,15 +339,16 @@ def create_comparison_plot(energy_bins, openmc_flux, openmc_std, yamc_flux, yamc
     fig.add_trace(
         go.Scatter(
             x=bin_centers, y=ymc_flux_plot, mode='markers',
-            marker=dict(color='red', size=4, symbol='square'),
-            error_y=dict(type='data', array=ymc_std_plot, visible=True, color='red', thickness=1),
+            marker=dict(color=ymc_style["color"], size=4, symbol=ymc_style["marker"]),
+            error_y=dict(type='data', array=ymc_std_plot, visible=True,
+                         color=ymc_style["color"], thickness=1),
             showlegend=False,
         ),
         row=1, col=1
     )
 
     fig.add_trace(
-        create_step_trace(energy_bins, ratio, f'{yamc_label} / {ref_label}', 'green'),
+        create_step_trace(energy_bins, ratio, f'{yamc_label} / {ref_label}', ratio_color),
         row=2, col=1
     )
     fig.add_hline(y=1.0, line_dash="dash", line_color="gray", row=2, col=1)
