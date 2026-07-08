@@ -978,6 +978,12 @@
                      "#e87ba4", "#eb6834", "#008300"];
   var FLUX_DECADES = 6;
 
+  /* secondary-photon series labels carry an electron-treatment suffix, e.g.
+     "YAMC CPU (LED)"; strip it so the per-backend PLOT_STYLES / RATIO_COLORS
+     keys ("YAMC CPU", ...) match and each backend gets its own colour instead
+     of all falling back to gray. */
+  function baseLabel(label) { return label.replace(/ \((?:LED|TTB)\)$/, ""); }
+
   function isDark() {
     return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
   }
@@ -1037,7 +1043,7 @@
     var maxE = maxEnergy || bins[bins.length - 1];
 
     var ref = null;
-    perLeth.forEach(function (s) { if (s.label === "OpenMC CPU") ref = s; });
+    perLeth.forEach(function (s) { if (baseLabel(s.label) === "OpenMC CPU") ref = s; });
     if (!ref && perLeth.length >= 2) ref = perLeth[0];
     var ratios = ref ? perLeth.filter(function (s) { return s !== ref; }) : [];
     var showRatio = ratios.length > 0;
@@ -1046,7 +1052,7 @@
     perLeth.forEach(function (s) {
       var masked = s.flux.map(function (v) { return v >= threshold ? v : null; });
       var maskedStd = s.std.map(function (v, j) { return s.flux[j] >= threshold ? v : null; });
-      var style = PLOT_STYLES[s.label] || { color: "gray", dash: null };
+      var style = PLOT_STYLES[baseLabel(s.label)] || { color: "gray", dash: null };
       var xy = stepXY(bins, masked);
       traces.push({ x: xy.x, y: xy.y, mode: "lines", name: s.label,
                     line: { color: style.color, width: 2, dash: style.dash || undefined } });
@@ -1061,11 +1067,12 @@
         return (v > 0 && ref.flux[j] > 0) ? v / ref.flux[j] : null;
       });
       var name = s.label + " / " + ref.label;
+      var colorKey = baseLabel(s.label) + " / " + baseLabel(ref.label);
       var xy = stepXY(bins, r);
       /* ratio traces carry their own legend, anchored over the ratio subplot */
       traces.push({ x: xy.x, y: xy.y, mode: "lines", name: name, yaxis: "y2",
                     legend: "legend2",
-                    line: { color: RATIO_COLORS[name] || "green", width: 2 } });
+                    line: { color: RATIO_COLORS[colorKey] || "green", width: 2 } });
     });
 
     var ax = axisDefaults();
@@ -1134,7 +1141,8 @@
       var xy = stepXY(bins, masked);
       return { x: xy.x, y: xy.y, mode: "lines", name: s.name,
                line: { color: STEP_COLORS[s.step % STEP_COLORS.length], width: 2,
-                       dash: s.code === "openmc" ? undefined : "dash" } };
+                       dash: s.code === "openmc" ? undefined
+                             : (s.code.indexOf("gpu") !== -1 ? "dot" : "dash") } };
     });
     var ax = axisDefaults();
     window.Plotly.newPlot(node, traces, plotlyLayout({
