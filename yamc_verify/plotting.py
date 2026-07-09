@@ -42,6 +42,26 @@ def create_step_trace(energy_bins, values, name, color, dash=None, showlegend=Tr
     )
 
 
+# Reduced-chi-squared agreement bands: the SINGLE grading rule shared by every
+# spectrum family (neutron, photon, secondary-photon, decay-photon). A comparison
+# is graded by how many sigma the two codes differ per bin, which separates a
+# genuine systematic discrepancy from Monte Carlo noise. Transmutation still grades
+# on relative difference because its densities carry no uncertainty (yamc #188).
+QUALITY_CHI2_THRESHOLDS = (1.5, 3.0, 5.0)  # Excellent < 1.5 <= Good < 3.0 <= Fair < 5.0 <= Poor
+
+
+def quality_from_chi2(reduced_chi_squared) -> str:
+    """Map a reduced chi-squared to an Excellent / Good / Fair / Poor band."""
+    exc, good, fair = QUALITY_CHI2_THRESHOLDS
+    if reduced_chi_squared < exc:
+        return "Excellent"
+    if reduced_chi_squared < good:
+        return "Good"
+    if reduced_chi_squared < fair:
+        return "Fair"
+    return "Poor"
+
+
 def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6):
     """Statistical agreement metrics comparing one spectrum to a reference.
 
@@ -105,14 +125,7 @@ def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6
     other_only_flux_pct = (oth_only_flux / oth_total * 100) if oth_total > 0 else 0.0
     ref_only_flux_pct = (ref_only_flux / ref_total * 100) if ref_total > 0 else 0.0
 
-    if reduced_chi_squared < 1.5:
-        quality = "Excellent"
-    elif reduced_chi_squared < 3.0:
-        quality = "Good"
-    elif reduced_chi_squared < 5.0:
-        quality = "Fair"
-    else:
-        quality = "Poor"
+    quality = quality_from_chi2(reduced_chi_squared)
 
     return {
         "reduced_chi_squared": reduced_chi_squared,

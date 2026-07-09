@@ -368,7 +368,14 @@ def run_yamc_flux_spectrum(nuclide: str, task: Task, yamc_chain):
 # Shared metrics / tables / plot (byte-identical across both notebooks)
 # --------------------------------------------------------------------------
 def transmute_quality_label(max_rel_diff):
-    """Assign quality label based on max relative difference (%) for transmutation."""
+    """Assign quality label based on max relative difference (%) for transmutation.
+
+    Transmutation is the one family NOT graded on reduced chi-squared (the shared
+    rule the spectrum families use via plotting.quality_from_chi2): its depletion
+    densities are point values with no uncertainty, so chi-squared is not defined.
+    It stays on relative difference until per-nuclide density uncertainties exist
+    (yamc issue #188), at which point it should move onto quality_from_chi2 too.
+    """
     if max_rel_diff < 0.1:
         return "Excellent"
     elif max_rel_diff < 1.0:
