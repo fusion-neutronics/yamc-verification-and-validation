@@ -24,7 +24,7 @@ from plotly.subplots import make_subplots
 
 from .. import discovery
 from ..geometry import openmc_region, yamc_region
-from ..plotting import BACKEND_STYLES, RATIO_COLORS
+from ..plotting import BACKEND_STYLES, RATIO_COLORS, quality_from_chi2
 from ..runstep import run_step
 from ..tasks import Task
 
@@ -408,14 +408,7 @@ def calculate_spectral_agreement(openmc_flux, yamc_flux, openmc_std, yamc_std, f
         float(np.sum(weighted_rel_diffs) / np.sum(flux_weights)) if flux_weights else 0.0
     )
 
-    if reduced_chi_squared < 1.5:
-        quality = "Excellent"
-    elif reduced_chi_squared < 3.0:
-        quality = "Good"
-    elif reduced_chi_squared < 5.0:
-        quality = "Fair"
-    else:
-        quality = "Poor"
+    quality = quality_from_chi2(reduced_chi_squared)
 
     return {
         'reduced_chi_squared': reduced_chi_squared,
@@ -441,18 +434,6 @@ def create_agreement_table(stats):
          'Note': f"({stats['bins_analyzed']}/{stats['total_bins']} bins analyzed)"},
     ]
     return pd.DataFrame(rows)
-
-
-def d1s_quality_label(max_rel_diff):
-    """Assign quality label based on max relative difference (%) for D1S."""
-    if max_rel_diff < 2.0:
-        return "Excellent"
-    elif max_rel_diff < 5.0:
-        return "Good"
-    elif max_rel_diff < 10.0:
-        return "Fair"
-    else:
-        return "Poor"
 
 
 def rel_diff(a, b):
@@ -486,12 +467,28 @@ def compute_step_metrics(openmc_result, yamc_result, timesteps, phases):
         if np.isfinite(m['total_rel_pct'])
     ]
     max_total_rel = max(finite_diffs) if finite_diffs else 0.0
-    quality = d1s_quality_label(max_total_rel)
+
+    # Grade on the worst per-timestep reduced chi-squared, the same measure the
+    # other spectrum families use (single source: plotting.quality_from_chi2),
+    # instead of the total-flux relative difference. The per-step total_rel_pct
+    # stays in the table as a diagnostic.
+    step_chi2 = []
+    for step_idx in range(len(timesteps)):
+        stats = calculate_spectral_agreement(
+            np.array(openmc_result['spectra'][step_idx]),
+            np.array(yamc_result['spectra'][step_idx]),
+            np.array(openmc_result['spectra_std'][step_idx]),
+            np.array(yamc_result['spectra_std'][step_idx]),
+        )
+        step_chi2.append(stats['reduced_chi_squared'])
+    worst_chi2 = max(step_chi2) if step_chi2 else 0.0
+    quality = quality_from_chi2(worst_chi2)
     speedup = openmc_result['elapsed'] / yamc_result['elapsed'] if yamc_result['elapsed'] > 0 else float('inf')
 
     return {
         'step_metrics': step_metrics,
         'max_total_rel_pct': max_total_rel,
+        'reduced_chi_squared': worst_chi2,
         'quality': quality,
         'speedup': speedup,
     }

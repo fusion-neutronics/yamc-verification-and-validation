@@ -28,7 +28,7 @@ from plotly.subplots import make_subplots
 
 from .. import discovery
 from ..geometry import openmc_region, yamc_region
-from ..plotting import BACKEND_STYLES, RATIO_COLORS
+from ..plotting import BACKEND_STYLES, RATIO_COLORS, quality_from_chi2
 from ..runstep import run_step
 from ..tasks import Task
 
@@ -592,14 +592,7 @@ def calculate_spectral_agreement(openmc_flux, yamc_flux, openmc_std, yamc_std, f
     median_rel_diff = np.median(rel_diffs) if rel_diffs else 0.0
     weighted_avg_rel_diff = np.sum(weighted_rel_diffs) / np.sum(flux_weights) if flux_weights else 0.0
 
-    if reduced_chi_squared < 1.5:
-        quality = "Excellent"
-    elif reduced_chi_squared < 3.0:
-        quality = "Good"
-    elif reduced_chi_squared < 5.0:
-        quality = "Fair"
-    else:
-        quality = "Poor"
+    quality = quality_from_chi2(reduced_chi_squared)
 
     return {
         'reduced_chi_squared': reduced_chi_squared,
