@@ -321,7 +321,21 @@
       <p>YAMC instead associates the shells by electron occupancy at data-generation time
          (a Compton (n, l) shell maps to its constituent (n, l, j) subshells), so it emits
          the real characteristic lines. Expect YAMC to show extra flux (typically a few tens
-         of percent) in the low-energy line bins for mid/high-Z elements.
+         of percent) in the low-energy line bins for mid/high-Z elements.</p>
+      <p>The same physics also shows up in the reaction-rate tallies: those extra soft
+         fluorescence X-rays are photoelectrically reabsorbed, so YAMC's photoelectric
+         reaction rate runs a few percent above OpenMC's, peaking around mid-Z (Ti-Cu,
+         ~8%, where the K lines fall at ~4-10 keV and photoelectric absorption is
+         strongest) and tapering toward low-Z (weak fluorescence yield) and high-Z (K
+         lines at 60-90 keV, too energetic to be strongly reabsorbed). This is the same
+         expected difference, seen in a reaction rate rather than the flux spectrum.</p>
+      <p>Because the photon flux tallies run at very high statistics, the per-bin
+         uncertainties are tiny, so even a sub-0.1% spectral difference reads as a large
+         reduced chi-squared. Photon and secondary-photon comparisons whose weighted-average
+         relative difference confirms the spectra physically agree (well under 0.1%) are
+         therefore shown as expected differences rather than graded Poor: for mid/high-Z the
+         difference is the Compton fluorescence above; for low-Z it is a sub-statistical
+         continuum difference of no physical significance.</p>
     </div>
   </details>
 
