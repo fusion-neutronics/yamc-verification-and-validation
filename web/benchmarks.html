@@ -354,11 +354,7 @@
         <select id="f-library"></select>
       </div>
       <div class="field">
-        <label for="f-element">Element</label>
-        <select id="f-element"></select>
-      </div>
-      <div class="field">
-        <label for="f-item">Nuclide / element</label>
+        <label for="f-item">Material</label>
         <select id="f-item"></select>
       </div>
       <div class="field" id="field-treatment" hidden>
@@ -452,7 +448,7 @@
   function band(c) { return c.category || c.quality; }
   function isExpected(c) { return band(c) === EXPECTED; }
   var HIST_EDGES = [0, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, Infinity];
-  var FILTER_FIELDS = ["family", "geometry", "library", "element", "item"];
+  var FILTER_FIELDS = ["family", "geometry", "library", "item"];
   var FIELD_LABEL = function (field, value) {
     return field === "family" ? (FAMILY_LABEL[value] || value) : value;
   };
@@ -460,7 +456,7 @@
   /* ---------- state ---------- */
 
   var index = null;
-  var filters = { family: "", geometry: "", library: "", element: "", item: "" };
+  var filters = { family: "", geometry: "", library: "", item: "" };
   var comparedOnly = false;
   /* Electron-treatment view for treatment-suffixed codes (secondary-photon):
      which treatment the OpenMC-vs-YAMC comparison columns/aggregates show.
@@ -674,7 +670,7 @@
     var nExp = pairs.length - graded.length;
 
     box.appendChild(tile("Simulations", fmtInt(sims), "one cached run of one code"));
-    box.appendChild(tile("Benchmarks", fmtInt(recs.length), "type × geometry × library × item"));
+    box.appendChild(tile("Benchmarks", fmtInt(recs.length), "type × geometry × library × material"));
     box.appendChild(tile("Paired comparisons", fmtInt(pairs.length),
       nExp ? "OpenMC + YAMC both cached (" + nExp + " expected differences)" : "OpenMC + YAMC both cached"));
     box.appendChild(tile("Floats compared", fmtInt(floats), "spectrum bins, tallies, densities"));
@@ -818,7 +814,7 @@
       value: function (r) { return r.geometry; } },
     { key: "library", label: "Library", sortable: true,
       value: function (r) { return r.library; } },
-    { key: "item", label: "Item", sortable: true, cls: "item-cell",
+    { key: "item", label: "Material", sortable: true, cls: "item-cell",
       value: function (r) { return r.item; } },
     { key: "codes", label: "Cached results", sortable: false, render: renderCodesCell },
     { key: "cmp-cpu", label: "YAMC CPU vs OpenMC", sortable: true, render: cmpCellRenderer("yamc-cpu") },
