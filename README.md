@@ -156,9 +156,18 @@ the editable extension the notebooks import.
 
 ## Building the book
 
+The docs are a [MyST](https://mystmd.org) site (configured by `myst.yml`), so
+they build with the standalone `mystmd` CLI (Node.js). No Python `jupyter-book`
+install is needed:
+
 ```bash
-jupyter-book start   # serves at http://localhost:3000
+npm install -g mystmd   # one-time
+myst start              # dev server with live reload at http://localhost:3000
+myst build --html       # static build into _build/html
 ```
+
+`myst` reads `myst.yml` directly. CI (`.github/workflows/pages.yml`) still builds
+via `jupyter-book`, which just wraps the same MyST engine, so the output matches.
 
 ## The benchmark database page
 

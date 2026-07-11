@@ -308,6 +308,20 @@
          single photon-heating number. The two are then equivalent. A raw YAMC-photon
          vs OpenMC-photon-only comparison would differ by the electron and positron
          contribution, which is a bookkeeping difference, not a physics one.</p>
+
+      <h4>Compton-ionization fluorescence (photon benchmarks)</h4>
+      <p>When a Compton scatter ionizes a bound shell, the vacancy relaxes and emits
+         a characteristic fluorescence X-ray (Fe K-alpha 6.4 keV, Cu 8.0 keV, W/Pb L
+         and K lines). Both codes emit these only if they can match each Compton-profile
+         shell to its atomic-relaxation subshell, and the two ENDF/B-VIII.1 tables come
+         from different evaluations (Biggs Compton profiles vs EADL relaxation) whose
+         binding energies for the same shell disagree by ~0.5-1%. OpenMC matches them by
+         binding energy within a 1e-5 tolerance, when deciding whether to emit a
+         fluorescence photon.
+      <p>YAMC instead associates the shells by electron occupancy at data-generation time
+         (a Compton (n, l) shell maps to its constituent (n, l, j) subshells), so it emits
+         the real characteristic lines. Expect YAMC to show extra flux (typically a few tens
+         of percent) in the low-energy line bins for mid/high-Z elements.
     </div>
   </details>
 
