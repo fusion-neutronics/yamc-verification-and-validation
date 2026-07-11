@@ -1664,9 +1664,13 @@
         geoPanel.appendChild(el("p", "note",
           "xz slice: the geometry is identical for every " + rec.item_kind + " in this task; " +
           "only the material composition changes."));
-      } else {
+      } else if (rec.family.startsWith("transmutation")) {
         geoPanel.appendChild(el("p", "note",
           "No transport geometry: this task depletes a material against a fixed multigroup flux."));
+      } else {
+        geoPanel.appendChild(el("p", "note",
+          "Interactive geometry viewer for this model is not available yet; the "
+          + "spectrum above is the neutron flux in the " + rec.item + " cell."));
       }
       stack.appendChild(geoPanel);
     });

@@ -84,6 +84,12 @@ for _lib, _parts in (("endf-b8.1", 5_000_000), ("fendl-3.2c", 500_000)):
          item_kind="nuclide", codes=_mc_codes(), caches_yamc=True,
          particles=_parts, batches=10, source_energy=14.06e6, dims=_BROOM)
 
+# ---- neutron tokamak (fixed multi-material geometry; per-cell flux spectra) --
+_reg(key="neutron/tokamak/endf-b8.1", notebook="tasks/neutron/tokamak/endf-b8.1.ipynb",
+     family="neutron", geometry="tokamak", library="endf-b8.1", label="neutron tokamak",
+     item_kind="cell", codes=("openmc", "yamc-cpu"), caches_yamc=True,
+     particles=2_000_000, batches=5, source_energy=14.06e6, dims=_SPHERE)
+
 # ---- photon (element; caches YAMC) ----------------------------------------
 for _lib, _parts in (("endf-b8.1", 5_000_000), ("fendl-3.2c", 500_000)):
     _reg(key=f"photon/sphere/{_lib}", notebook=f"tasks/photon/sphere/{_lib}.ipynb",
