@@ -123,6 +123,45 @@ from yamc_verify.run_task import run_task
 run_task(get_task("neutron/sphere/endf-b8.1"), backends.resolve())
 ```
 
+## Adding a nuclear data library
+
+1. Add the library path to `NUCLEAR_DATA_DIR` in `yamc_verify/tasks.py`.
+2. Register a `Task` for each model/geometry using the new library (copy an
+   existing entry and change `library`/`particles`).
+3. Run it (`./run_models.sh <task-key>`); the index builder and the benchmark
+   database page pick up the new library automatically (library is a facet).
+
+## Adding a model
+
+1. Add a new family module under `yamc_verify/families/` (or reuse one), exposing
+   a `run_all(task, backends, cache_dir=...)` like the others.
+2. Register `Task`s for it in `yamc_verify/tasks.py`, and map the new
+   `task.family` to the module in `yamc_verify/run_task.py`.
+3. Run it with `./run_models.sh <task-key>`; results land in the task's cache and
+   appear in the benchmark database page.
+
+## Results cache
+
+Simulation results are cached as JSON under
+`tasks/<model>/<...>/cache/<library>/<code>/<nuclide>.json` (via `cache_utils.py`),
+so re-running a task does not repeat simulations that are already cached. Two
+invalidation policies:
+
+- **OpenMC** results are keyed by the run parameters only (library, particles,
+  batches, source energy). OpenMC is fixed, so these stay valid until a parameter
+  changes.
+- **YAMC** results are additionally keyed by the **yamc version and git commit**
+  (`cache_utils.yamc_fingerprint()`). Rebuilding or updating yamc auto-invalidates
+  the cache and the affected simulations re-run on the next run. On a wheel
+  install with no git checkout the commit is `null` and invalidation falls back to
+  the version.
+
+To force everything to re-run, delete the cache directories:
+
+```bash
+rm -rf tasks/*/*/cache
+```
+
 ## Auditing YAMC vs OpenMC agreement
 
 To find which nuclides / simulation modes disagree with OpenMC, scan the cache:
@@ -143,62 +182,64 @@ compare)".
 
 ## Using the latest yamc
 
-The notebooks import yamc as an editable install, but its compiled Rust core is
-only rebuilt on demand. After pulling new yamc changes, rebuild the core so the
-notebooks pick them up:
+YAMC is used as an editable install, but its compiled Rust core is only rebuilt
+on demand. After pulling new yamc changes, rebuild the core so the runs pick them
+up:
 
 ```bash
 cd ../yamc && maturin develop --release
 ```
 
 Run this from your `yamc` checkout in an environment that has `maturin`; it updates
-the editable extension the notebooks import.
+the editable extension the runs import.
 
-## Building the book
+## The benchmark database page (the site)
 
-The docs are a [MyST](https://mystmd.org) site (configured by `myst.yml`), so
-they build with the standalone `mystmd` CLI (Node.js). No Python `jupyter-book`
-install is needed:
+The deployed site is a single standalone page, `web/benchmarks.html`, served as
+the root `index.html`. It reads a generated `benchmarks-index.json` and lets you
+filter every cached benchmark by simulation type / geometry / library / element /
+nuclide, with headline agreement stats. Clicking a row expands a detail view with
+the interactive model geometry, the flux-spectrum comparison plot, and the
+reaction-rate table, pulled live from the on-disk cache.
 
-```bash
-npm install -g mystmd   # one-time
-myst start              # dev server with live reload at http://localhost:3000
-myst build --html       # static build into _build/html
-```
-
-`myst` reads `myst.yml` directly. CI (`.github/workflows/pages.yml`) still builds
-via `jupyter-book`, which just wraps the same MyST engine, so the output matches.
-
-## The benchmark database page
-
-`web/benchmarks.html` is a standalone, dependency-free page (linked from the
-book's intro) that reads a generated `benchmarks-index.json` and lets you filter
-every cached benchmark by simulation type / geometry / library / element /
-nuclide, with headline agreement stats. Clicking a row expands a detail view
-with the interactive model geometry, the flux-spectrum comparison plot, and the
-reaction-rate table — the same content the notebooks render, pulled live from
-the on-disk cache. The index is built by:
+The page is a pure viewer: it holds no results data, inlines its own CSS, and
+uses only relative paths. It never needs editing when results change; only its
+data does. When the cache changes, regenerate the index (and, on the published
+site, the copied cache) - the page itself is untouched:
 
 ```bash
 python -m yamc_verify.index_builder --out benchmarks-index.json
 ```
 
-(In CI, `.github/workflows/pages.yml` builds it and copies the page, the
-`web/models/` geometry viewers, and the results cache into the published site.)
+CI (`.github/workflows/pages.yml`) is correspondingly minimal: it installs
+`numpy pandas plotly`, generates the index, copies `benchmarks.html` (as the root
+`index.html`), `logo.png`, and `web/models/`, drops in the results cache, and
+publishes to GitHub Pages. Every push to `main` regenerates the index, so the
+published site always reflects the current cache. There is no MyST, Node, or
+`jupyter-book` involved.
 
 ### Serving it locally
 
-`fetch` does not work from `file://`, so the page must be served over HTTP with
-`benchmarks-index.json`, `models/`, and the `tasks/` cache reachable at the
-paths it requests. The simplest way is to build the index into `web/`, symlink
-the cache in beside it, and serve that directory (both are git-ignored):
+`fetch` does not work from `file://`, so serve the page over HTTP with
+`benchmarks-index.json`, `models/`, and the `tasks/` cache reachable at the paths
+it requests. Build the index into `web/`, symlink the cache in beside it, and
+serve that directory (the generated files are git-ignored):
 
 ```bash
 python -m yamc_verify.index_builder --out web/benchmarks-index.json
-ln -s ../tasks web/tasks
+ln -sfn ../tasks web/tasks
+cp web/benchmarks.html web/index.html    # so "/" serves the page, mirroring deploy
 python -m http.server 8321 --directory web
-# open http://localhost:8321/benchmarks.html
+# open http://localhost:8321/
 ```
 
-Rebuild `web/benchmarks-index.json` whenever the cache changes to pick up new
-results.
+Rebuild the index whenever the cache changes to pick up new results.
+
+## Troubleshooting
+
+### A task run fails
+
+Check the per-task log the orchestrator prints on failure. Common issues:
+
+- Missing nuclear data files (correct the data path used).
+- OpenMC or YAMC not installed in the virtual environment.

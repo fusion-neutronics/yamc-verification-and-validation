@@ -1,9 +1,6 @@
 --extra-index-url https://shimwell.github.io/wheels
-jupyter-book>=2.1.5
-nbconvert
 numpy
 pandas
 plotly>=5.0.0
-kaleido
 openmc
 openmc_data>=2.4.0

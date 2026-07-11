@@ -1,4 +1,4 @@
-name: Build and deploy Jupyter Book
+name: Deploy benchmark database page
 
 on:
   push:
@@ -24,30 +24,25 @@ jobs:
         with:
           python-version: "3.13"
 
+      # The site is the single standalone web/benchmarks.html page; the only
+      # build step is generating the index JSON it reads. index_builder needs
+      # just these three.
       - name: Install build deps
-        run: pip install "jupyter-book>=2.0.0" numpy pandas plotly
+        run: pip install numpy pandas plotly
 
-      # no positional "." — jupyter-book >= 2.1 treats it as a file-export
-      # target and builds nothing ("No file exports found").
-      # BASE_URL: MyST emits root-absolute asset/link URLs; without the
-      # project-page prefix everything 404s under github.io/<repo>/
-      - name: Build site
-        run: jupyter-book build --html
-        env:
-          BASE_URL: /${{ github.event.repository.name }}
-
-      # NOT index.json: the MyST export owns _build/html/index.json (intro page data)
-      - name: Build benchmark index
-        run: python -m yamc_verify.index_builder --out _build/html/benchmarks-index.json
-
-      - name: Add benchmark database page
+      # benchmarks.html is the landing page (served as index.html at the root),
+      # uses only relative paths, and inlines its own CSS, so there is no MyST /
+      # Node / BASE_URL involved: just copy the page and its assets, generate the
+      # index, and drop in the results cache the detail views lazy-load.
+      - name: Assemble static site
         run: |
-          cp web/benchmarks.html _build/html/benchmarks.html
-          cp -r web/models _build/html/models
-
-      # detail views lazy-load per-benchmark cache JSON (~19 MB total)
-      - name: Publish results cache for the database page
-        run: find tasks -path '*/cache/*' -name '*.json' -exec cp --parents -t _build/html {} +
+          mkdir -p _site
+          cp web/benchmarks.html _site/index.html
+          cp web/logo.png _site/logo.png
+          cp -r web/models _site/models
+          python -m yamc_verify.index_builder --out _site/benchmarks-index.json
+          # detail views lazy-load per-benchmark cache JSON (~19 MB total)
+          find tasks -path '*/cache/*' -name '*.json' -exec cp --parents -t _site {} +
 
       - uses: actions/configure-pages@v5
         with:
@@ -55,7 +50,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: _build/html
+          path: _site
 
   deploy:
     needs: build
