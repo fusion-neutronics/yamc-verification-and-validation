@@ -438,6 +438,11 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     when run under nbconvert is the notebook's own directory (so the default
     ``"cache"`` lands in ``tasks/<family>/<geometry>/cache`` as before).
     """
+    if task.geometry == "tokamak":
+        from . import tokamak
+
+        return tokamak.run_all(task, backends, cache_dir=cache_dir)
+
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
