@@ -220,20 +220,20 @@ published site always reflects the current cache. There is no MyST, Node, or
 
 ### Serving it locally
 
-`fetch` does not work from `file://`, so serve the page over HTTP with
-`benchmarks-index.json`, `models/`, and the `tasks/` cache reachable at the paths
-it requests. Build the index into `web/`, symlink the cache in beside it, and
-serve that directory (the generated files are git-ignored):
+`fetch` does not work from `file://`, so the page must be served over HTTP. Use
+`serve_site.sh`, which builds the site exactly as the Pages CI does (into
+`_site/`, git-ignored) and serves it, so what you see locally is what deploys:
 
 ```bash
-python -m yamc_verify.index_builder --out web/benchmarks-index.json
-ln -sfn ../tasks web/tasks
-cp web/benchmarks.html web/index.html    # so "/" serves the page, mirroring deploy
-python -m http.server 8321 --directory web
-# open http://localhost:8321/
+source .venv/bin/activate
+./serve_site.sh            # build + serve on http://localhost:8321/
+# PORT=9000 ./serve_site.sh to pick a different port
 ```
 
-Rebuild the index whenever the cache changes to pick up new results.
+It uses the results cache in your working tree (`tasks/*/cache/*.json`) and
+regenerates `benchmarks-index.json` on each run. Because CI only sees committed
+files, the **deployed** site shows this data only if that cache is committed too
+(see [Results cache](#results-cache)).
 
 ## Troubleshooting
 
