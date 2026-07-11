@@ -1,5 +1,6 @@
-# Jupyter Book build output
+# Static site build output (benchmark database page)
 _build/
+_site/
 
 # OpenMC/YAMC simulation output
 statepoint.*.h5
