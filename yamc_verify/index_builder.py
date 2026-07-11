@@ -170,6 +170,22 @@ def _transmutation_extra_nuclides(ymc, reduced_set):
     return sorted(seen)
 
 
+def _element_z(symbol: str) -> int:
+    """Atomic number for an element symbol (e.g. ``'Fe' -> 26``), or 0 if unknown.
+
+    Used only to gate the Compton-fluorescence expected-difference rule to
+    mid/high-Z elements, so a missing symbol safely yields 0 (rule does not fire).
+    """
+    if not symbol:
+        return 0
+    try:
+        from openmc.data import ATOMIC_NUMBER
+
+        return int(ATOMIC_NUMBER.get(symbol, 0))
+    except Exception:
+        return 0
+
+
 def _compare(task, omc, ymc, reduced_set=None):
     """Agreement metrics for one paired (benchmark, backend), or None.
 
@@ -229,6 +245,28 @@ def _compare(task, omc, ymc, reduced_set=None):
             out["expected_reason"] = "d1s-daughter-gammas"
             if ref_total > 0:
                 out["yamc_over_openmc_flux"] = oth_total / ref_total
+        # photon / secondary-photon: YAMC emits the real Compton-ionization
+        # fluorescence characteristic lines (K/L) that OpenMC drops on
+        # ENDF/B-VIII.1. Both codes map a Compton-profile shell to its
+        # relaxation subshell to relax it, but OpenMC accepts the match only
+        # within 1e-5 relative binding energy, which fails for every shell (the
+        # Biggs Compton-profile and EADL relaxation binding energies disagree
+        # ~0.5-1%), so OpenMC banks ~no Compton fluorescence. YAMC associates the
+        # shells by occupancy at data-generation time, so it emits the lines and
+        # over-produces the low-energy line bins for mid/high-Z. That is YAMC
+        # being more complete, not a regression; categorize it as the expected
+        # difference. See yamc #200 / #190.
+        elif (
+            task.family in ("photon", "secondary-photon")
+            and quality in ("Fair", "Poor")
+            and ref_total > 0.0
+            and oth_total > ref_total
+            and _element_z(element_from_nuclide(ymc.get("element") or omc.get("element") or ""))
+            >= 20
+        ):
+            out["category"] = EXPECTED
+            out["expected_reason"] = "compton-ionization-fluorescence"
+            out["yamc_over_openmc_flux"] = oth_total / ref_total
     if n_scalars:
         out["max_tally_rel_diff_pct"] = worst_scalar_pct
         out["worst_tally"] = worst_scalar
