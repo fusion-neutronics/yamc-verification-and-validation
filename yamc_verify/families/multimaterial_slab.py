@@ -24,11 +24,10 @@ The layer stack is a fusion-blanket-like sequence (plasma-facing outward):
 void (source gap) -> tungsten (armour) -> steel (structure) -> Li4SiO4 breeder
 -> water (coolant) -> graphite (reflector) -> vanadium (low-activation structure).
 
-Geometry is fully bounded (finite boxes, vacuum implicit complement) so it is
-GPU-ready. ``yamc-gpu`` is nonetheless excluded from the task for now: the GPU
-backend currently panics on multi-material geometries whose materials have
-different nuclide sets (yamc#208, an XS-extraction buffer bug, not a geometry
-limitation). Add ``yamc-gpu`` back to the task's ``codes`` once that is fixed.
+Geometry is fully bounded (finite boxes, vacuum implicit complement), so it runs
+on all three backends (openmc / yamc-cpu / yamc-gpu). Getting yamc-gpu to run
+this multi-material stack was what surfaced and fixed the GPU multi-material
+XS-extraction bug (yamc#208).
 """
 from __future__ import annotations
 
