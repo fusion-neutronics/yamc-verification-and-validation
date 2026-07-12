@@ -40,7 +40,7 @@ from cache_utils import _decode, yamc_fingerprint
 
 from . import tasks as _tasks
 from .discovery import element_from_nuclide
-from .plotting import calculate_spectral_agreement
+from .plotting import calculate_spectral_agreement, quality_from_chi2
 from .reduced_chains import load as load_reduced_chains
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -76,7 +76,7 @@ def _jsonable(obj):
         return {str(k): _jsonable(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_jsonable(v) for v in obj]
-    if isinstance(obj, (np.floating, np.integer)):
+    if isinstance(obj, np.generic):  # np.floating / np.integer / np.bool_ -> Python scalar
         obj = obj.item()
     if isinstance(obj, float) and not math.isfinite(obj):
         return None
@@ -112,8 +112,42 @@ def _spectrum_pairs(results):
         yield f"step{i + 1}", mean, std
 
 
-def _compare_spectra(omc, ymc):
-    """Per-spectrum agreement stats for every spectrum both codes cached."""
+def _expected_spec(task, element, spectrum_name, omc, ymc):
+    """Per-bin ``{index -> 'over'|'under'}`` expected-difference spec for one spectrum.
+
+    Physics-derived and independent of the observed discrepancy (see
+    ``yamc_verify.expected`` and yamc-verification #59). Empty dict when the family /
+    spectrum carries no declared expected difference, so the spectrum grades on its
+    full residual.
+    """
+    if task is None:
+        return {}
+    from . import expected as _exp
+
+    fam = task.family
+    edges = omc.get(_SPECTRUM_EDGE_KEY.get(spectrum_name, "energy_bins"))
+    if fam in ("photon", "secondary-photon"):
+        # fluorescence lives in the photon spectrum only: "flux" for the photon
+        # family, "photon" (p_spectrum) for secondary-photon. The neutron spectrum
+        # of a secondary-photon run grades normally.
+        photon_spectrum = "flux" if fam == "photon" else "photon"
+        if spectrum_name == photon_spectrum:
+            return _exp.photon_expected_spec(element, edges)
+    # decay-photon: the D1S daughter gammas OpenMC omits are YAMC-only lines, which
+    # fall in bins where OpenMC has ~zero flux and so never enter the shared-bin
+    # chi-squared. They therefore do not affect the grade and need no bin exclusion;
+    # they are annotated from ``other_only_flux_pct`` in ``_compare``. Attributing
+    # each YAMC-only line to a specific daughter gamma (vs a spurious emission) is a
+    # follow-up refinement (#59) that would use ``expected.decay_gamma_bins``.
+    return {}
+
+
+def _compare_spectra(omc, ymc, task=None, element=None):
+    """Per-spectrum agreement stats for every spectrum both codes cached.
+
+    When ``task`` is given, each spectrum is graded on its residual after the
+    family's declared expected difference (if any) is removed.
+    """
     o_map = {name: (m, s) for name, m, s in _spectrum_pairs(omc)}
     y_map = {name: (m, s) for name, m, s in _spectrum_pairs(ymc)}
     spectra = []
@@ -121,9 +155,11 @@ def _compare_spectra(omc, ymc):
         if name not in y_map or len(y_map[name][0]) != len(o_mean):
             continue
         y_mean, y_std = y_map[name]
+        expected = _expected_spec(task, element, name, omc, ymc)
         stats = calculate_spectral_agreement(
             {"flux_spectra_mean": o_mean, "flux_spectra_std_dev": o_std},
             {"flux_spectra_mean": y_mean, "flux_spectra_std_dev": y_std},
+            expected=expected or None,
         )
         spectra.append({"name": name, **stats})
     return spectra
@@ -148,17 +184,25 @@ def _scalar_rel_diffs(omc, ymc):
     return count, worst, worst_name
 
 
-EXPECTED = "Expected differences"
+# Residual grading (yamc-verification #59). Every comparison gets one of the four
+# grades, computed on the residual after a known, physics-derived expected difference
+# is removed (see yamc_verify.expected). The expected difference is recorded as an
+# annotation, never as a grade band.
+_EXPECTED_REASON = {
+    "photon": "compton-ionization-fluorescence",
+    "secondary-photon": "compton-ionization-fluorescence",
+    "decay-photon": "d1s-daughter-gammas",
+}
 
-# photon / secondary-photon spectra grade chi-squared-Poor at 50M+ particles even when
-# they physically agree to well under 0.1%: the per-bin uncertainties are so tight that
-# a sub-0.1% systematic reads as a chi-squared in the thousands. A comparison whose
-# weighted-average relative difference is below this ceiling is treated as an expected
-# difference (Compton-ionization fluorescence for Z >= 20, a sub-statistical continuum
-# difference otherwise) rather than a Poor grade. The ceiling sits well above the
-# observed worst case (~0.08%); a genuine regression pushes the weighted relative
-# difference above it and keeps its numeric grade. Tunable.
-PHOTON_EXPECTED_MAX_WTD_REL_DIFF_PCT = 0.5
+# If the flux removed as an expected directional difference exceeds this fraction of
+# the spectrum, the "expected" explanation is implausibly large (fluorescence / decay
+# lines are a small part of the flux). Flag the comparison for review and keep its FULL
+# grade rather than letting the exclusion rescue it. Tunable.
+MAX_EXPECTED_EXCLUDED_FLUX_PCT = 5.0
+
+# spectrum name -> the results key holding that spectrum's energy-bin edges. Names not
+# listed (e.g. decay-photon "step1".."stepN") fall back to "energy_bins".
+_SPECTRUM_EDGE_KEY = {"flux": "energy_bins", "neutron": "n_energy_bins", "photon": "p_energy_bins"}
 
 
 def _transmutation_extra_nuclides(ymc, reduced_set):
@@ -180,30 +224,14 @@ def _transmutation_extra_nuclides(ymc, reduced_set):
     return sorted(seen)
 
 
-def _element_z(symbol: str) -> int:
-    """Atomic number for an element symbol (e.g. ``'Fe' -> 26``), or 0 if unknown.
-
-    Used only to gate the Compton-fluorescence expected-difference rule to
-    mid/high-Z elements, so a missing symbol safely yields 0 (rule does not fire).
-    """
-    if not symbol:
-        return 0
-    try:
-        from openmc.data import ATOMIC_NUMBER
-
-        return int(ATOMIC_NUMBER.get(symbol, 0))
-    except Exception:
-        return 0
-
-
-def _compare(task, omc, ymc, reduced_set=None):
+def _compare(task, omc, ymc, reduced_set=None, element=None):
     """Agreement metrics for one paired (benchmark, backend), or None.
 
-    ``reduced_set`` is OpenMC's reduced-chain nuclide set for this seed (from the
-    reduced_chains sidecar), used to annotate transmutation comparisons with the
-    nuclides OpenMC's reduced chain cannot produce. ``category`` is the display
-    band: the numeric quality normally, or ``EXPECTED`` when the difference is a
-    known physics-driven one (YAMC more complete).
+    Residual grading (#59): every comparison gets one of the four grades, computed
+    on the residual after the family's declared, physics-derived expected difference
+    is removed. The expected difference, when present, is recorded in an
+    ``expected_difference`` annotation (never a grade band). ``reduced_set`` is
+    OpenMC's reduced-chain nuclide set for a transmutation seed.
     """
     if task.family.startswith("transmutation"):
         from .families.transmutation import compare_transmutation_steps
@@ -214,83 +242,71 @@ def _compare(task, omc, ymc, reduced_set=None):
             )
         except Exception:
             return None
-        return {
+        out = {
             "kind": "transmutation",
             "quality": cmp["quality"],
-            "category": cmp["quality"],
             "weighted_avg_rel_diff_pct": cmp["rms_rel_diff_pct"],
             "max_rel_diff_pct": cmp["max_rel_diff_pct"],
             "products_compared": cmp["n_total"],
             "floats_compared": len(cmp["detail_rows"]),
-            "expected_extra_nuclides": _transmutation_extra_nuclides(ymc, reduced_set),
         }
+        extra = _transmutation_extra_nuclides(ymc, reduced_set)
+        if extra:
+            # YAMC produces nuclides outside OpenMC's reduced chain by construction;
+            # transmutation already grades on the in-chain products, so this is a
+            # pure annotation.
+            out["expected_difference"] = {
+                "reason": "reduced-chain-out-of-chain-nuclides",
+                "nuclides": extra,
+            }
+        return out
 
-    spectra = _compare_spectra(omc, ymc)
+    spectra = _compare_spectra(omc, ymc, task=task, element=element)
     n_scalars, worst_scalar_pct, worst_scalar = _scalar_rel_diffs(omc, ymc)
     if not spectra and not n_scalars:
         return None
+    # Per-spectrum "quality" is already the residual grade (see plotting).
     quality = _worst_quality([s["quality"] for s in spectra])
     out = {
         "kind": "spectrum",
         "quality": quality,
-        "category": quality,
         "floats_compared": sum(s["total_bins"] for s in spectra) + n_scalars,
     }
     if spectra:
         weights = [max(s["bins_analyzed"], 1) for s in spectra]
         out["reduced_chi_squared"] = max(s["reduced_chi_squared"] for s in spectra)
+        out["residual_reduced_chi_squared"] = max(
+            s.get("residual_reduced_chi_squared", s["reduced_chi_squared"]) for s in spectra
+        )
         out["weighted_avg_rel_diff_pct"] = float(
             sum(s["weighted_avg_rel_diff"] * w for s, w in zip(spectra, weights)) / sum(weights)
         )
         out["spectra"] = spectra
-        ref_total = sum(s.get("ref_total_flux", 0.0) for s in spectra)
-        oth_total = sum(s.get("other_total_flux", 0.0) for s in spectra)
-        # decay-photon: a diverging comparison is the D1S daughter-gamma difference
-        # (YAMC includes the decay products' gammas, OpenMC's D1S omits them). chi2
-        # is hypersensitive here (tight per-bin stats make any real difference read
-        # as Poor), so a numeric grade is misleading; categorize the divergence as
-        # the expected difference instead. Comparisons that agree keep their grade.
-        if task.family == "decay-photon" and quality in ("Fair", "Poor"):
-            out["category"] = EXPECTED
-            out["expected_reason"] = "d1s-daughter-gammas"
-            if ref_total > 0:
-                out["yamc_over_openmc_flux"] = oth_total / ref_total
-        # photon / secondary-photon: these spectra grade chi-squared-Poor at 50M+
-        # particles even when they physically agree to well under 0.1% (the per-bin
-        # uncertainties are tight enough that a sub-0.1% systematic reads as a huge
-        # chi-squared). The underlying difference is a known, expected one, not a
-        # regression: YAMC emits the real Compton-ionization fluorescence
-        # characteristic lines (K/L) that OpenMC drops on ENDF/B-VIII.1. Both codes
-        # map a Compton-profile shell to its relaxation subshell to relax it, but
-        # OpenMC accepts the match only within 1e-5 relative binding energy, which
-        # fails for every shell (the Biggs Compton-profile and EADL relaxation binding
-        # energies disagree ~0.5-1%), so OpenMC banks ~no Compton fluorescence. YAMC
-        # associates the shells by occupancy at data-generation time, so it emits the
-        # lines. That extra soft-X-ray flux is also photoelectrically reabsorbed, so
-        # YAMC's photoelectric reaction rate runs a few percent higher (peaking at
-        # mid-Z, where the K lines are ~4-10 keV). All of it is YAMC being more
-        # complete, not a regression. See yamc #200 / #190.
-        #
-        # Categorize as expected when the weighted-average relative difference confirms
-        # the spectra physically agree (the guard: a genuine regression pushes the
-        # weighted rel diff above the ceiling and keeps its numeric grade). The reason
-        # is Compton fluorescence for mid/high-Z (Z >= 20, where it dominates) and a
-        # sub-statistical continuum difference otherwise.
-        elif (
-            task.family in ("photon", "secondary-photon")
-            and quality in ("Fair", "Poor")
-            and out.get("weighted_avg_rel_diff_pct", float("inf"))
-            < PHOTON_EXPECTED_MAX_WTD_REL_DIFF_PCT
-        ):
-            element = element_from_nuclide(ymc.get("element") or omc.get("element") or "")
-            out["category"] = EXPECTED
-            out["expected_reason"] = (
-                "compton-ionization-fluorescence"
-                if _element_z(element) >= 20
-                else "sub-statistical-photon-spectrum"
-            )
-            if ref_total > 0.0:
-                out["yamc_over_openmc_flux"] = oth_total / ref_total
+        # Expected-difference annotation: set only when a declared expected difference
+        # was actually removed from the residual. Never changes the grade, except that
+        # an implausibly large exclusion trips needs_review and reverts to the full grade.
+        excluded_pct = max((s.get("excluded_flux_pct", 0.0) for s in spectra), default=0.0)
+        other_only_pct = max((s.get("other_only_flux_pct", 0.0) for s in spectra), default=0.0)
+        if any(s.get("excluded_bins") for s in spectra):
+            needs_review = bool(excluded_pct > MAX_EXPECTED_EXCLUDED_FLUX_PCT)
+            out["expected_difference"] = {
+                "reason": _EXPECTED_REASON.get(task.family, "expected"),
+                "excluded_flux_pct": excluded_pct,
+                "full_reduced_chi_squared": out["reduced_chi_squared"],
+                "residual_reduced_chi_squared": out["residual_reduced_chi_squared"],
+                "needs_review": needs_review,
+            }
+            if needs_review:
+                out["quality"] = quality_from_chi2(out["reduced_chi_squared"])
+        elif task.family == "decay-photon" and other_only_pct > 1.0:
+            # D1S daughter gammas are YAMC-only flux (not in the shared-bin chi-squared,
+            # so the grade is already the residual); annotate them. residual_adjusted
+            # stays False until the daughter-line attribution refinement lands (#59).
+            out["expected_difference"] = {
+                "reason": "d1s-daughter-gammas",
+                "other_only_flux_pct": other_only_pct,
+                "residual_adjusted": False,
+            }
     if n_scalars:
         out["max_tally_rel_diff_pct"] = worst_scalar_pct
         out["worst_tally"] = worst_scalar
@@ -303,7 +319,9 @@ def _mismatch_key(cmp):
     Quality leads so chi2-less comparisons (transmutation) rank with the
     spectrum ones instead of always sorting below them.
     """
-    chi2 = cmp.get("reduced_chi_squared")
+    # Rank on the residual chi-squared (the graded value), not the full one, so a
+    # comparison whose only difference is an accounted-for expected one sorts low.
+    chi2 = cmp.get("residual_reduced_chi_squared", cmp.get("reduced_chi_squared"))
     rd = cmp.get("max_tally_rel_diff_pct") or cmp.get("max_rel_diff_pct")
     return (
         _QUALITY_ORDER.index(cmp["quality"]) if cmp.get("quality") in _QUALITY_ORDER else -1,
@@ -374,6 +392,7 @@ def build_index(tasks_list=None, worst_n=15):
             for code in loaded:
                 base, treatment = _split_treatment(code)
                 by_treatment.setdefault(treatment, {})[base] = code
+            element = key if task.item_kind == "element" else element_from_nuclide(key)
             for treatment in sorted(by_treatment):
                 group = by_treatment[treatment]
                 ref = group.get("openmc")
@@ -386,7 +405,7 @@ def build_index(tasks_list=None, worst_n=15):
                     code = group[base]
                     y_meta, y_res = loaded[code]
                     reduced_set = reduced_chains.get(key) if reduced_chains else None
-                    cmp = _compare(task, omc_res, y_res, reduced_set=reduced_set)
+                    cmp = _compare(task, omc_res, y_res, reduced_set=reduced_set, element=element)
                     if cmp is not None:
                         comparisons.append({
                             "code": code,
@@ -403,7 +422,7 @@ def build_index(tasks_list=None, worst_n=15):
                 "library": task.library,
                 "item": key,
                 "item_kind": task.item_kind,
-                "element": key if task.item_kind == "element" else element_from_nuclide(key),
+                "element": element,
                 "codes": sorted(loaded),
                 "files": {
                     c: code_files[c][key].relative_to(_REPO_ROOT).as_posix() for c in loaded
@@ -422,10 +441,11 @@ def build_index(tasks_list=None, worst_n=15):
                 unindexed.append(lib_dir.relative_to(_REPO_ROOT).as_posix())
 
     flat = [(r, c) for r in records for c in r["comparisons"]]
-    # Expected-differences comparisons are physics-driven (YAMC more complete), so
-    # they are graded in their own category and kept out of the deviation
-    # distribution and the worst-mismatch list, which are about genuine agreement.
-    graded = [(r, c) for r, c in flat if c.get("category") != EXPECTED]
+    # Residual grading (#59): every comparison carries a genuine grade, so all of
+    # them enter the deviation distribution and worst-mismatch list. A comparison
+    # whose only difference was an accounted-for expected one grades Excellent and
+    # sorts low naturally (its residual chi-squared is small).
+    graded = flat
     worst = sorted(graded, key=lambda rc: _mismatch_key(rc[1]), reverse=True)[:worst_n]
     index = {
         "schema_version": 1,
@@ -446,13 +466,16 @@ def build_index(tasks_list=None, worst_n=15):
             "elements": sorted({r["element"] for r in records}),
         },
         "agreement": {
-            "quality_counts": dict(Counter(c["category"] for _, c in flat if c.get("category"))),
-            "expected_differences": sum(1 for _, c in flat if c.get("category") == EXPECTED),
+            "quality_counts": dict(Counter(c["quality"] for _, c in flat if c.get("quality"))),
+            "expected_differences": sum(1 for _, c in flat if c.get("expected_difference")),
+            "needs_review": sum(
+                1 for _, c in flat if (c.get("expected_difference") or {}).get("needs_review")
+            ),
             "weighted_avg_rel_diff_pct": _distribution(
                 [c.get("weighted_avg_rel_diff_pct") for _, c in graded]
             ),
-            "reduced_chi_squared": _distribution(
-                [c.get("reduced_chi_squared") for _, c in graded]
+            "residual_reduced_chi_squared": _distribution(
+                [c.get("residual_reduced_chi_squared", c.get("reduced_chi_squared")) for _, c in graded]
             ),
             "worst": [
                 {

@@ -62,7 +62,7 @@ def quality_from_chi2(reduced_chi_squared) -> str:
     return "Poor"
 
 
-def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6):
+def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6, expected=None):
     """Statistical agreement metrics comparing one spectrum to a reference.
 
     Relative-difference and chi-squared metrics are computed only over bins where
@@ -73,11 +73,25 @@ def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6
     flux the other code lacks). A large ``other_only_flux_pct`` is the signature of
     one code emitting where the other does not, for example D1S decay-product
     gammas that OpenMC's D1S omits.
+
+    ``expected`` optionally declares bins that carry a known, physics-driven
+    directional difference (e.g. Compton-ionization fluorescence lines where YAMC
+    exceeds OpenMC). It maps ``bin_index -> "over" | "under"`` where ``"over"``
+    means "other is expected to exceed ref" and ``"under"`` the reverse. In such a
+    bin only the excess in the *expected* direction is removed for the residual
+    chi-squared; a deviation in the opposite direction still counts in full. This
+    is deliberately one-sided and localized so that a real regression next to an
+    expected difference is never masked (see yamc-verification #59). The full
+    chi-squared is always reported unchanged as ``reduced_chi_squared``; the grade
+    (``quality``) is taken from ``residual_reduced_chi_squared``. With
+    ``expected=None`` the residual equals the full value and the result is
+    identical to the pre-residual behaviour.
     """
     ref_flux = np.asarray(ref_results["flux_spectra_mean"], dtype=float)
     ref_std = np.asarray(ref_results["flux_spectra_std_dev"], dtype=float)
     oth_flux = np.asarray(other_results["flux_spectra_mean"], dtype=float)
     oth_std = np.asarray(other_results["flux_spectra_std_dev"], dtype=float)
+    expected = expected or {}
 
     peak = max(float(np.max(ref_flux)) if ref_flux.size else 0.0,
                float(np.max(oth_flux)) if oth_flux.size else 0.0)
@@ -85,7 +99,8 @@ def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6
     # floor; falls back to the absolute threshold for an all-zero spectrum.
     thr = peak / 1e6 if peak > 0 else flux_threshold
 
-    chi_squared_terms = []
+    chi_squared_terms = []       # full: (o - r) per both-on bin
+    residual_chi_squared_terms = []  # residual: expected excess removed
     rel_diffs = []
     weighted_rel_diffs = []
     flux_weights = []
@@ -93,6 +108,8 @@ def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6
     oth_total = float(np.sum(oth_flux[oth_flux > 0]))
     ref_only_flux = 0.0  # reference flux in bins where the other is ~0
     oth_only_flux = 0.0  # other flux in bins where the reference is ~0
+    excluded_flux = 0.0  # flux removed as an expected directional difference
+    excluded_bins = []
 
     for i in range(len(ref_flux)):
         r = ref_flux[i]
@@ -101,9 +118,25 @@ def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6
         o_on = o >= thr
         if r_on and o_on:
             combined_std = np.sqrt(ref_std[i] ** 2 + oth_std[i] ** 2)
+            diff = o - r
+            # Residual difference: remove only the excess in the expected
+            # direction. "over": drop positive (o - r), keep any shortfall.
+            # "under": drop negative (o - r), keep any overshoot.
+            resid = diff
+            direction = expected.get(i)
+            if direction == "over" and diff > 0:
+                resid = 0.0
+            elif direction == "under" and diff < 0:
+                resid = 0.0
+            if resid != diff:
+                removed = abs(diff) - abs(resid)
+                if removed > 0:
+                    excluded_flux += removed
+                    excluded_bins.append(i)
             if combined_std > 0:
-                chi_squared_terms.append(((o - r) / combined_std) ** 2)
-            rel_diff = abs((o - r) / r) * 100
+                chi_squared_terms.append((diff / combined_std) ** 2)
+                residual_chi_squared_terms.append((resid / combined_std) ** 2)
+            rel_diff = abs(diff / r) * 100
             if np.isfinite(rel_diff):
                 rel_diffs.append(rel_diff)
                 weight = max(r, o)
@@ -114,9 +147,11 @@ def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6
         elif r_on and not o_on:
             ref_only_flux += r
 
-    chi_squared = np.sum(chi_squared_terms)
     dof = len(chi_squared_terms)
-    reduced_chi_squared = chi_squared / dof if dof > 0 else 0.0
+    reduced_chi_squared = float(np.sum(chi_squared_terms)) / dof if dof > 0 else 0.0
+    residual_reduced_chi_squared = (
+        float(np.sum(residual_chi_squared_terms)) / dof if dof > 0 else 0.0
+    )
 
     median_rel_diff = float(np.median(rel_diffs)) if rel_diffs else 0.0
     weighted_avg_rel_diff = (
@@ -124,11 +159,16 @@ def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6
     )
     other_only_flux_pct = (oth_only_flux / oth_total * 100) if oth_total > 0 else 0.0
     ref_only_flux_pct = (ref_only_flux / ref_total * 100) if ref_total > 0 else 0.0
+    excluded_flux_pct = (excluded_flux / oth_total * 100) if oth_total > 0 else 0.0
 
-    quality = quality_from_chi2(reduced_chi_squared)
+    # Grade on the residual: a known expected difference does not degrade the grade,
+    # but anything left after removing it (continuum, opposite-sign, non-declared
+    # bins) still does.
+    quality = quality_from_chi2(residual_reduced_chi_squared)
 
     return {
         "reduced_chi_squared": reduced_chi_squared,
+        "residual_reduced_chi_squared": residual_reduced_chi_squared,
         "degrees_of_freedom": dof,
         "median_rel_diff": median_rel_diff,
         "weighted_avg_rel_diff": weighted_avg_rel_diff,
@@ -139,6 +179,8 @@ def calculate_spectral_agreement(ref_results, other_results, flux_threshold=1e-6
         "ref_only_flux_pct": ref_only_flux_pct,
         "ref_total_flux": ref_total,
         "other_total_flux": oth_total,
+        "excluded_flux_pct": excluded_flux_pct,
+        "excluded_bins": excluded_bins,
     }
 
 

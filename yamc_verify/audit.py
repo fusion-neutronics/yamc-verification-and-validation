@@ -84,8 +84,13 @@ def _max_tally_reldiff(openmc, yamc):
     return worst, score
 
 
-def audit(tasks_list=None, *, current_only=False):
-    """Return (rows, unauditable) where rows are per (task, nuclide, backend)."""
+def audit(tasks_list=None, *, current_only=False, raw=False):
+    """Return (rows, unauditable) where rows are per (task, nuclide, backend).
+
+    By default rows are graded on the residual after known expected differences
+    (Compton fluorescence lines, etc.) are removed, matching the dashboard. ``raw``
+    grades on the full spectrum, ignoring expected-difference signatures.
+    """
     fp_sha = yamc_fingerprint().get("yamc_core_sha")
     tasks_list = tasks_list or _tasks.all_tasks()
     rows: list[Row] = []
@@ -109,7 +114,7 @@ def audit(tasks_list=None, *, current_only=False):
                 if t.family.startswith("transmutation"):
                     row = _transmutation_row(t, key, backend, omc, ymc, stale)
                 else:
-                    row = _spectrum_row(t, key, backend, omc, ymc, stale)
+                    row = _spectrum_row(t, key, backend, omc, ymc, stale, raw=raw)
                 if row is not None:
                     rows.append(row)
 
@@ -117,13 +122,22 @@ def audit(tasks_list=None, *, current_only=False):
     return rows, unauditable
 
 
-def _spectrum_row(t, key, backend, omc, ymc, stale):
+def _spectrum_row(t, key, backend, omc, ymc, stale, raw=False):
     if "flux_spectra_mean" not in omc or "flux_spectra_mean" not in ymc:
         return None
-    stats = calculate_spectral_agreement(omc, ymc)
+    expected = None
+    if not raw:
+        from .discovery import element_from_nuclide
+        from .index_builder import _expected_spec
+
+        element = key if getattr(t, "item_kind", None) == "element" else element_from_nuclide(key)
+        expected = _expected_spec(t, element, "flux", omc, ymc) or None
+    stats = calculate_spectral_agreement(omc, ymc, expected=expected)
     worst, score = _max_tally_reldiff(omc, ymc)
+    # Report (and rank / threshold on) the residual chi-squared, the graded value.
+    chi2 = stats.get("residual_reduced_chi_squared", stats["reduced_chi_squared"])
     return Row(task=f"{t.family}/{t.geometry}", nuclide=key, backend=backend,
-               quality=stats["quality"], chi2=stats["reduced_chi_squared"],
+               quality=stats["quality"], chi2=chi2,
                wavg_reldiff=stats["weighted_avg_rel_diff"], max_tally_reldiff=worst,
                worst_score=score, stale=stale)
 
@@ -163,9 +177,11 @@ def main(argv=None):
     ap.add_argument("--reldiff", type=float, default=5.0, help="relative-difference %% mismatch threshold")
     ap.add_argument("--current-only", action="store_true", help="skip YAMC caches from an older build")
     ap.add_argument("--all", action="store_true", help="list every compared benchmark, not just mismatches")
+    ap.add_argument("--raw", action="store_true",
+                    help="grade on the full spectrum, ignoring expected-difference signatures")
     args = ap.parse_args(argv)
 
-    rows, unauditable = audit(current_only=args.current_only)
+    rows, unauditable = audit(current_only=args.current_only, raw=args.raw)
     mismatches = [r for r in rows if _is_mismatch(r, args.chi2, args.reldiff)]
     shown = (rows if args.all else mismatches)
     if args.worst:
