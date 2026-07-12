@@ -90,10 +90,16 @@ _reg(key="neutron/tokamak/endf-b8.1", notebook="tasks/neutron/tokamak/endf-b8.1.
      item_kind="cell", codes=("openmc", "yamc-cpu"), caches_yamc=True,
      particles=2_000_000, batches=5, source_energy=14.06e6, dims=_SPHERE)
 
-# ---- neutron box (thick single-nuclide cube; leakage spectrum; no actinides) --
-_reg(key="neutron/box/endf-b8.1", notebook="tasks/neutron/box/endf-b8.1.ipynb",
-     family="neutron", geometry="box", library="endf-b8.1", label="neutron box",
-     item_kind="element", codes=("openmc", "yamc-cpu"), caches_yamc=True,
+# ---- neutron multimaterial slab (fixed layered geometry; per-layer flux spectra) --
+# GPU excluded for now: the GPU backend panics on multi-material geometries with
+# heterogeneous nuclide grids (yamc#208); the model geometry is GPU-ready (fully
+# bounded, vacuum implicit complement) so ``yamc-gpu`` can be added back once that
+# XS-extraction bug is fixed.
+_reg(key="neutron/multimaterial-slab/endf-b8.1",
+     notebook="tasks/neutron/multimaterial-slab/endf-b8.1.ipynb",
+     family="neutron", geometry="multimaterial-slab", library="endf-b8.1",
+     label="neutron multimaterial slab", item_kind="cell",
+     codes=("openmc", "yamc-cpu"), caches_yamc=True,
      particles=2_000_000, batches=5, source_energy=14.06e6, dims=_SPHERE)
 
 # ---- photon (element; caches YAMC) ----------------------------------------
