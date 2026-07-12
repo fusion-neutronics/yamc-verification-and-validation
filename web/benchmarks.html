@@ -478,22 +478,30 @@
     "yamc-gpu-ttb": "YAMC GPU (TTB)"
   };
   var QUALITIES = ["Excellent", "Good", "Fair", "Poor"];
-  var EXPECTED = "Expected differences";
-  // display bands shown in the quality bar/legend: the four agreement grades
-  // plus the physics-driven "Expected differences" category (its own hue, off
-  // the green-to-red severity ramp, since it is not "worse than Poor").
-  var BANDS = QUALITIES.concat([EXPECTED]);
+  // Residual grading (yamc-verification #59): every comparison carries one of the
+  // four agreement grades, computed on the residual after any known, physics-driven
+  // expected difference is removed. There is no separate "Expected differences" band.
+  var BANDS = QUALITIES;
   var QCOLOR = {
     "Excellent": "var(--q-excellent)",
     "Good": "var(--q-good)",
     "Fair": "var(--q-fair)",
-    "Poor": "var(--q-poor)",
-    "Expected differences": "var(--q-expected)"
+    "Poor": "var(--q-poor)"
   };
-  // the display band for a comparison: the physics-driven category when set,
-  // else its numeric agreement grade.
-  function band(c) { return c.category || c.quality; }
-  function isExpected(c) { return band(c) === EXPECTED; }
+  // the display band for a comparison is simply its (residual) grade.
+  function band(c) { return c.quality; }
+  // whether a known expected difference was accounted for (a badge, not a grade).
+  function isExpected(c) { return !!c.expected_difference; }
+  function expectedText(c) {
+    var e = c.expected_difference; if (!e) return "";
+    var s = "expected: " + (e.reason || "difference");
+    var pct = e.excluded_flux_pct != null ? e.excluded_flux_pct
+            : (e.other_only_flux_pct != null ? e.other_only_flux_pct : null);
+    if (pct != null) s += " (" + pct.toFixed(2) + "% of flux)";
+    if (e.nuclides && e.nuclides.length) s += " (+" + e.nuclides.length + " out-of-chain nuclides)";
+    if (e.needs_review) s += " -- review: exclusion implausibly large, showing full grade";
+    return s;
+  }
   var HIST_EDGES = [0, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, Infinity];
   var FILTER_FIELDS = ["family", "geometry", "library", "item"];
   var FIELD_LABEL = function (field, value) {
@@ -613,13 +621,13 @@
     return out;
   }
 
-  /* severity: quality band first, then chi2, then worst rel diff (mirrors the index builder).
-     Expected differences are physics-driven, not mismatches, so they sort below Poor
-     (as a neutral band) rather than topping the worst-first order. */
+  /* severity: quality band first, then residual chi2, then worst rel diff (mirrors
+     the index builder). Ranks on the residual chi-squared (the graded value), so a
+     comparison whose only difference is an accounted-for expected one sorts low. */
   function severity(c) {
-    if (isExpected(c)) return 0.5e12;  // between "no comparison" and Excellent
     var q = QUALITIES.indexOf(c.quality);
-    var chi2 = num(c.reduced_chi_squared) || 0;
+    var chi2 = num(c.residual_reduced_chi_squared);
+    if (chi2 === null) chi2 = num(c.reduced_chi_squared) || 0;
     var rd = num(c.max_tally_rel_diff_pct);
     if (rd === null) rd = num(c.max_rel_diff_pct) || 0;
     return (q + 1) * 1e12 + Math.min(chi2, 1e5) * 1e6 + Math.min(rd, 1e5);
@@ -708,8 +716,10 @@
     recs.forEach(function (r) { sims += r.codes.length; });
     pairs.forEach(function (p) { floats += p.cmp.floats_compared || 0; });
 
-    // deviation stats exclude Expected differences (physics-driven, not disagreement)
-    var graded = pairs.filter(function (p) { return !isExpected(p.cmp); });
+    // Residual grading (#59): every comparison carries a genuine grade, so all enter
+    // the deviation stats. A comparison whose only difference is an accounted-for
+    // expected one grades Excellent and its weighted rel diff is small.
+    var graded = pairs;
     var devs = graded.map(function (p) { return num(p.cmp.weighted_avg_rel_diff_pct); })
                      .filter(function (v) { return v !== null; })
                      .sort(function (a, b) { return a - b; });
@@ -756,7 +766,6 @@
     var legend = $("qlegend");
     legend.textContent = "";
     BANDS.forEach(function (b) {
-      if (b === EXPECTED && !counts[b]) return;  // only show the extra band when present
       var key = el("span", "key");
       var dot = el("span", "dot");
       dot.style.background = QCOLOR[b];
@@ -781,7 +790,6 @@
     for (var i = 0; i < HIST_EDGES.length - 1; i++) bins.push(0);
     var n = 0;
     pairs.forEach(function (p) {
-      if (isExpected(p.cmp)) return;  // expected differences are not graded on this scale
       var v = num(p.cmp.weighted_avg_rel_diff_pct);
       if (v === null) return;
       n++;
@@ -812,7 +820,7 @@
       axis.appendChild(el("span", null, binLabel(i)));
     });
     $("hist-sub").textContent = "Relative difference per comparison (%), " +
-      deviationLabel(pairs.filter(function (p) { return !isExpected(p.cmp); })) + ", n = " + n;
+      deviationLabel(pairs) + ", n = " + n;
   }
 
   /* ---------- tooltip ---------- */
@@ -890,20 +898,19 @@
       badge.appendChild(el("span", null, b || "n/a"));
       td.appendChild(badge);
       var m;
-      if (isExpected(c)) {
-        m = c.yamc_over_openmc_flux
-          ? "YAMC " + c.yamc_over_openmc_flux.toFixed(1) + "x flux (D1S daughter gammas)"
-          : "physics-driven (see notes)";
-      } else if (c.kind === "transmutation") {
+      if (c.kind === "transmutation") {
         m = "rms " + fmtPct(c.weighted_avg_rel_diff_pct) + " · max " + fmtPct(c.max_rel_diff_pct);
-        if (c.expected_extra_nuclides && c.expected_extra_nuclides.length) {
-          m += " · +" + c.expected_extra_nuclides.length + " extra";
-        }
       } else {
-        m = "χ² " + fmtChi2(c.reduced_chi_squared) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
+        var chi = c.residual_reduced_chi_squared != null
+          ? c.residual_reduced_chi_squared : c.reduced_chi_squared;
+        m = "χ² " + fmtChi2(chi) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
       }
       td.appendChild(document.createElement("br"));
       td.appendChild(el("span", "metrics", m));
+      if (isExpected(c)) {
+        td.appendChild(document.createElement("br"));
+        td.appendChild(el("span", "metrics dim", expectedText(c)));
+      }
     };
   }
 
@@ -1610,15 +1617,14 @@
           dot.style.background = QCOLOR[b] || "var(--baseline)";
           badge.appendChild(dot);
           var m;
-          if (isExpected(c)) {
-            m = c.yamc_over_openmc_flux
-              ? "YAMC emits " + c.yamc_over_openmc_flux.toFixed(1) + "x the decay-photon flux (D1S daughter gammas)"
-              : "physics-driven difference";
-          } else if (c.kind === "transmutation") {
+          if (c.kind === "transmutation") {
             m = "rms " + fmtPct(c.weighted_avg_rel_diff_pct) + " · max " + fmtPct(c.max_rel_diff_pct);
           } else {
-            m = "χ² " + fmtChi2(c.reduced_chi_squared) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
+            var chi = c.residual_reduced_chi_squared != null
+              ? c.residual_reduced_chi_squared : c.reduced_chi_squared;
+            m = "χ² " + fmtChi2(chi) + " · " + fmtPct(c.weighted_avg_rel_diff_pct);
           }
+          if (isExpected(c)) m += " · " + expectedText(c);
           badge.appendChild(el("span", null,
             (CODE_LABEL[c.code] || c.code) + " vs OpenMC: " + b + " (" + m + ")"));
           badges.appendChild(badge);
@@ -1627,7 +1633,7 @@
         // transmutation: nuclides OpenMC's reduced chain cannot produce (chain membership)
         var extra = [];
         rec.comparisons.forEach(function (c) {
-          (c.expected_extra_nuclides || []).forEach(function (n) {
+          (((c.expected_difference || {}).nuclides) || []).forEach(function (n) {
             if (extra.indexOf(n) < 0) extra.push(n);
           });
         });
