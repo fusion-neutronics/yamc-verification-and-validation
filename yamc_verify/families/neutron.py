@@ -442,6 +442,10 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
         from . import tokamak
 
         return tokamak.run_all(task, backends, cache_dir=cache_dir)
+    if task.geometry == "box":
+        from . import box
+
+        return box.run_all(task, backends, cache_dir=cache_dir)
 
     from ..backends import resolve
 

@@ -90,6 +90,12 @@ _reg(key="neutron/tokamak/endf-b8.1", notebook="tasks/neutron/tokamak/endf-b8.1.
      item_kind="cell", codes=("openmc", "yamc-cpu"), caches_yamc=True,
      particles=2_000_000, batches=5, source_energy=14.06e6, dims=_SPHERE)
 
+# ---- neutron box (thick single-nuclide cube; leakage spectrum; no actinides) --
+_reg(key="neutron/box/endf-b8.1", notebook="tasks/neutron/box/endf-b8.1.ipynb",
+     family="neutron", geometry="box", library="endf-b8.1", label="neutron box",
+     item_kind="element", codes=("openmc", "yamc-cpu"), caches_yamc=True,
+     particles=2_000_000, batches=5, source_energy=14.06e6, dims=_SPHERE)
+
 # ---- photon (element; caches YAMC) ----------------------------------------
 for _lib, _parts in (("endf-b8.1", 5_000_000), ("fendl-3.2c", 500_000)):
     _reg(key=f"photon/sphere/{_lib}", notebook=f"tasks/photon/sphere/{_lib}.ipynb",

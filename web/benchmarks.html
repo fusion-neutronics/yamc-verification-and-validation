@@ -339,6 +339,53 @@
     </div>
   </details>
 
+  <details class="callout">
+    <summary>What each geometry tests</summary>
+    <div class="body">
+      <p>Every benchmark runs one of a few geometries. Each stresses a different
+         part of the transport, so which geometries agree and which disagree
+         localizes where the codes diverge.</p>
+
+      <h4>Sphere (thin, single nuclide)</h4>
+      <p>A single-nuclide sphere at low density with a 14 MeV point source at the
+         centre, flux tallied over the whole volume. Near infinite dilution and
+         dominated by the source region, so it isolates a nuclide's raw cross
+         sections and its secondary energy/angle distributions with little
+         self-shielding. Best for verifying the fundamental per-nuclide data, and
+         fast to run.</p>
+
+      <h4>Box (thick, natural element)</h4>
+      <p>A large cube of a natural element at a realistic solid density, with a
+         14 MeV point source at the centre and the flux tallied in a thin outer
+         shell (a leakage proxy). Measuring the flux after transmission through
+         many mean-free-paths at a realistic atom density exposes resonance
+         self-shielding (including the multi-isotope self-shielding of a natural
+         element) and deep-penetration effects the thin sphere cannot see. Read
+         it together with the sphere: agreement in the sphere but disagreement in
+         the box points to a self-shielding / transport difference; disagreement
+         in both points to a fundamental cross-section difference. Actinides are
+         excluded, since a large dense fissile block would go critical.</p>
+
+      <h4>Broomstick (long thin cylinder)</h4>
+      <p>A long, thin, vacuum-capped cylinder with the source at the origin.
+         Neutrons stream along it and leak out with minimal multiple scattering,
+         isolating single-scatter energy and angle behaviour and the leakage
+         spectrum.</p>
+
+      <h4>Tokamak (realistic device)</h4>
+      <p>A multi-component fusion device (tungsten first wall, Li4SiO4 breeder,
+         steel central column, magnets, concrete bioshield) at real material
+         densities with a 14 MeV ring source. The neutron spectrum is compared
+         per component cell, testing deep transmission and self-shielding through
+         thick, realistic materials in an integrated geometry.</p>
+
+      <h4>Material (transmutation)</h4>
+      <p>Not a transport geometry: a material is depleted against a fixed
+         multigroup flux over a timestep schedule and its nuclide inventory is
+         compared. Used for burnup, activation, and transmutation verification.</p>
+    </div>
+  </details>
+
   <div id="app" hidden>
     <section class="filters" aria-label="Filters">
       <div class="field">
