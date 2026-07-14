@@ -144,11 +144,20 @@ def _spectrum_row(t, key, backend, omc, ymc, stale, raw=False):
 
 def _transmutation_row(t, key, backend, omc, ymc, stale):
     from .families import transmutation as tr
+    from .expected import transmutation_expected_products
 
     timesteps = t.extras.get("timesteps", [])
     phases = t.extras.get("phases", [])
+    # Isomer ground/metastable pairs differ by an expected branching amount only
+    # when the overlay is enabled; otherwise the set is empty and isomers grade
+    # normally (see expected.transmutation_expected_products).
+    branching_enabled = bool(t.extras.get("transmutation_branch_ratios"))
+    products = set()
+    for step in list(ymc.get("steps", [])) + list(omc.get("steps", [])):
+        products.update(step.keys())
+    expected = transmutation_expected_products(products, branching_enabled=branching_enabled)
     try:
-        cmp = tr.compare_transmutation_steps(ymc, omc, timesteps, phases)
+        cmp = tr.compare_transmutation_steps(ymc, omc, timesteps, phases, expected_products=expected)
     except Exception:
         return None
     return Row(task=f"{t.family}/{t.geometry}", nuclide=key, backend=backend,

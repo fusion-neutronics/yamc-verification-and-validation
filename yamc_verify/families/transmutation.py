@@ -386,8 +386,17 @@ def transmute_quality_label(max_rel_diff):
         return "Poor"
 
 
-def compare_transmutation_steps(yamc_result, openmc_result, timesteps, phases):
+def compare_transmutation_steps(yamc_result, openmc_result, timesteps, phases,
+                                expected_products=frozenset()):
     """Compare transmutation results step-by-step.
+
+    ``expected_products`` names nuclides whose YAMC-vs-OpenMC difference is a
+    known expected effect (isomer ground/metastable pairs when the branching
+    overlay is enabled; see ``expected.transmutation_expected_products``). Shared
+    products in that set are tallied under ``expected_diff_count`` and excluded
+    from the quality grade, so an expected branching difference does not read as
+    a regression. It is empty for the fixed-BR baseline, so isomers are still
+    graded normally there.
 
     Returns dict with detail_rows, summary metrics, and quality.
     """
@@ -395,6 +404,7 @@ def compare_transmutation_steps(yamc_result, openmc_result, timesteps, phases):
     shared_rel_diffs = []
     yamc_only_count = 0
     openmc_only_count = 0
+    expected_diff_count = 0
 
     for step_idx in range(len(timesteps)):
         ymc_step = yamc_result['steps'][step_idx] if step_idx < len(yamc_result['steps']) else {}
@@ -418,6 +428,7 @@ def compare_transmutation_steps(yamc_result, openmc_result, timesteps, phases):
             else:
                 rd = 0.0
 
+            is_expected = product in expected_products
             detail_rows.append({
                 'product': product,
                 'step': step_idx + 1,
@@ -426,10 +437,13 @@ def compare_transmutation_steps(yamc_result, openmc_result, timesteps, phases):
                 'openmc': o,
                 'rel_diff_pct': rd,
                 'shared': shared,
+                'expected': is_expected,
             })
 
-            if shared:
+            if shared and not is_expected:
                 shared_rel_diffs.append(rd)
+            elif shared and is_expected:
+                expected_diff_count += 1
             elif y_above and not o_above:
                 yamc_only_count += 1
             else:
@@ -456,6 +470,7 @@ def compare_transmutation_steps(yamc_result, openmc_result, timesteps, phases):
         'n_total': n_total,
         'yamc_only_count': yamc_only_count,
         'openmc_only_count': openmc_only_count,
+        'expected_diff_count': expected_diff_count,
         'quality': quality,
         'speedup': speedup,
     }

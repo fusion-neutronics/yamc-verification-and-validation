@@ -144,6 +144,82 @@ def generate_decay_gamma_lines(chain_file: str | Path, out_path: Path = _DECAY_P
 
 
 # --------------------------------------------------------------------------
+# Transmutation / depletion expected differences.
+#
+# The transmutation family compares YAMC-vs-OpenMC nuclide inventories per
+# timestep (families/transmutation.compare_transmutation_steps). Several
+# YAMC-vs-OpenMC differences there are physics/architecture facts, not bugs, and
+# must not count against the residual grade or the isotope ranking:
+#
+#  1. Full decay closure vs chain prune. YAMC's coupled depletion always solves
+#     the full decay closure, while OpenMC's `chain.reduce(level)` prunes the
+#     decay network. YAMC therefore produces low-density decay-fed daughters that
+#     OpenMC drops. These appear as `yamc_only` products; because the quality
+#     grade is taken over SHARED products only, they already do not degrade it,
+#     but they are expected and should be reported as such, not as errors.
+#
+#  2. Reaction-rate computation. YAMC's coupled path scores sigma(E)*track-length
+#     continuously during continuous-energy transport (transmutation_tallies),
+#     i.e. an exact flux-weighted rate with no group approximation. OpenMC's
+#     activation path collapses continuous-energy cross sections against a
+#     multigroup flux. On the same library this agrees to ~4 significant figures
+#     (validated), but tiny group-collapse differences are expected.
+#
+#  3. Continuous-energy isomeric branching (a YAMC capability OpenMC does not
+#     have). YAMC represents isomeric branching as a continuous-energy quantity:
+#     the verbatim energy-dependent MF=9/10 branching is folded against the
+#     transport spectrum at rate-compute time, so the ground/metastable split
+#     tracks the local neutron spectrum. Mainline OpenMC has no such
+#     representation; its chain carries a single, spectrum-independent
+#     pre-collapsed `branching_ratio` per reaction. This is a genuine capability
+#     difference, not a data or tuning difference. When YAMC's overlay
+#     is enabled (`yamc.transmutation_branch_ratios`) both a metastable product
+#     and its ground-state partner therefore differ from OpenMC by an expected,
+#     spectrum-dependent amount, and `transmutation_expected_products` excludes
+#     those pairs from the grade. The overlay is currently applied only in the
+#     flux-given `material.transmute` path, not the coupled `simulate_transmutation`
+#     path this suite runs, so the difference is absent today; the exclusion is
+#     gated on the overlay actually being enabled, so it can never mask a
+#     genuine disagreement in the fixed-BR baseline.
+#
+#  4. Data-limited isotopes. Some elements (e.g. In, Bi, and several rare earths)
+#     disagree with the FNS experiment by large factors for EVERY code (FISPACT,
+#     OpenMC, YAMC) because the underlying cross-section / branching / decay data
+#     are the limit, not any code's method. These are expected discrepancies vs
+#     experiment and should be annotated, not treated as YAMC regressions.
+# --------------------------------------------------------------------------
+
+def transmutation_expected_products(products, *, branching_enabled: bool) -> set[str]:
+    """Nuclide names whose YAMC-vs-OpenMC difference is an expected branching
+    effect, so the isotope ranking can exclude them from the quality grade.
+
+    When the isomeric-branching overlay is enabled, YAMC's spectrum-folded
+    ground/metastable split differs from OpenMC's single pre-collapsed
+    ``branching_ratio``; both a metastable (name ending ``_m<N>``) and its
+    ground-state partner are then expected to differ. Identified from the product
+    names alone (``Ag110_m1`` -> also ``Ag110``), so no precomputed data file is
+    needed.
+
+    Returns the empty set when ``branching_enabled`` is false: with the plain
+    fixed-BR chain YAMC and OpenMC must agree on isomers, so excluding them then
+    would mask a real bug. This keeps residual grading one-sided, matching the
+    photon signatures above.
+    """
+    if not branching_enabled:
+        return set()
+    import re
+
+    meta = re.compile(r"^(.+)_m\d+$")
+    out: set[str] = set()
+    for p in products or ():
+        m = meta.match(p)
+        if m:
+            out.add(p)  # the metastable
+            out.add(m.group(1))  # its ground-state partner
+    return out
+
+
+# --------------------------------------------------------------------------
 # Generator: rebuild data/fluorescence_lines.json from photon atomic-relaxation
 # data. Run as: python -m yamc_verify.expected [photon_dir]
 # --------------------------------------------------------------------------

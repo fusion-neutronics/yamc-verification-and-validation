@@ -180,6 +180,40 @@ disagreements. Only modes that cache **both** codes can be audited offline;
 modes that cache OpenMC only are reported as "not auditable offline (run them to
 compare)".
 
+### Expected differences
+
+Some YAMC-vs-OpenMC differences are physics or architecture facts, not bugs, and
+are removed from the residual grade so they do not distort the ranking. They are
+declared in `yamc_verify/expected.py`, never inferred from the observed
+discrepancy (so a real difference is never masked). Photon and decay-photon
+spectra carry per-bin line signatures (Compton fluorescence, D1S daughter
+gammas). For **transmutation** the known differences are:
+
+- **Full decay closure vs chain prune** — YAMC's coupled depletion solves the
+  full decay closure; OpenMC's `chain.reduce(level)` prunes it, so YAMC produces
+  trace decay-fed daughters OpenMC drops (`yamc_only` products). The grade is
+  taken over shared products only, so these already do not degrade it.
+- **CE-direct reaction rates** — YAMC's coupled path scores σ(E)·track-length
+  during continuous-energy transport (no group approximation); OpenMC collapses
+  cross sections against a multigroup flux. Same library agrees to ~4 sig figs.
+- **Continuous-energy isomeric branching (a YAMC capability OpenMC lacks)** —
+  YAMC represents isomeric branching in continuous energy: verbatim
+  energy-dependent MF=9/10 branching folded against the transport spectrum, so
+  the ground/metastable split tracks the local spectrum. Mainline OpenMC has no
+  such representation; its chain carries a single spectrum-independent
+  pre-collapsed `branching_ratio`. This is a genuine capability
+  difference. When YAMC's overlay is enabled both the metastable and its
+  ground-state partner differ from OpenMC by an expected, spectrum-dependent
+  amount, so `transmutation_expected_products` excludes those pairs from the
+  grade. It is gated on the overlay being enabled (currently the overlay runs
+  only in the `material.transmute` flux path, not the coupled
+  `simulate_transmutation` path this suite runs), so it never masks a fixed-BR
+  baseline disagreement.
+- **Data-limited isotopes** — In, Bi and several rare earths disagree with the
+  FNS experiment by large factors for every code (FISPACT, OpenMC, YAMC) because
+  the underlying data are the limit, not any code's method; these are annotated
+  as expected discrepancies vs experiment rather than YAMC regressions.
+
 ## Using the latest yamc
 
 YAMC is used as an editable install, but its compiled Rust core is only rebuilt
