@@ -8,6 +8,7 @@ YAMC is silenced with ``verbose=[]`` and OpenMC with ``verbosity=1`` +
 """
 from __future__ import annotations
 
+import os
 import time
 
 import numpy as np
@@ -37,6 +38,20 @@ _SPECIAL_SCORES = [
 # --------------------------------------------------------------------------
 # Simulation runners
 # --------------------------------------------------------------------------
+def _seed() -> int:
+    """Base RNG seed for both codes (``YAMC_VERIFY_SEED``, default 1). A run
+    with another seed is an independent sample of the same problem and caches
+    under its own key, so N-seed re-measurements of a single-bin claim (issue
+    fusion-neutronics/core#34 entry 6) do not disturb the seed-1 references."""
+    return int(os.environ.get("YAMC_VERIFY_SEED", "1"))
+
+
+def _cache_key(nuclide: str) -> str:
+    """Cache file key: the nuclide, suffixed with the seed when it is not 1."""
+    seed = _seed()
+    return nuclide if seed == 1 else f"{nuclide}-seed{seed}"
+
+
 def run_openmc_simulation(nuclide: str, task: Task) -> dict:
     """Run the OpenMC neutron simulation for one nuclide."""
     import openmc as mc
@@ -81,7 +96,7 @@ def run_openmc_simulation(nuclide: str, task: Task) -> dict:
         space=mc.stats.Point([0, 0, 0]),
     )
     settings = mc.Settings(
-        particles=task.particles, batches=task.batches, source=source, seed=1,
+        particles=task.particles, batches=task.batches, source=source, seed=_seed(),
         run_mode="fixed source", output={"tallies": False, "summary": False},
     )
     settings.verbosity = 1  # quiet OpenMC (combined with output=False on run)
@@ -142,7 +157,7 @@ def run_yamc_simulation(nuclide: str, task: Task, compute: str = "cpu"):
     )
     t0 = time.perf_counter()
     sim_results = model.simulate_transport(
-        total_particles=task.particles * task.batches, seed=1, compute=compute,
+        total_particles=task.particles * task.batches, seed=_seed(), compute=compute,
     )
     elapsed = time.perf_counter() - t0
 
@@ -426,6 +441,9 @@ def _metas(task: Task):
     openmc_meta = {
         "library": task.library, "particles": task.particles,
         "batches": task.batches, "source_energy": task.source_energy,
+        # Only a non-default seed enters the key, so the seed-1 references
+        # already cached stay valid.
+        **({"seed": _seed()} if _seed() != 1 else {}),
     }
     yamc_meta = {**openmc_meta, **yamc_fingerprint()}
     return openmc_meta, yamc_meta
@@ -461,7 +479,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
         if b.run_openmc:
             try:
                 per["openmc"] = run_step(
-                    cache_dir, task.library, "openmc", nuclide,
+                    cache_dir, task.library, "openmc", _cache_key(nuclide),
                     lambda n=nuclide: run_openmc_simulation(n, task), meta=openmc_meta, cache=True)
             except Exception as e:  # noqa: BLE001 - isolate backend failures
                 print(f"  OpenMC Error ({nuclide}): {e}")
@@ -475,7 +493,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
 
             try:
                 per[f"yamc-{compute}"] = run_step(
-                    cache_dir, task.library, f"yamc-{compute}", nuclide, _run,
+                    cache_dir, task.library, f"yamc-{compute}", _cache_key(nuclide), _run,
                     meta=yamc_meta, cache=task.caches_yamc)
                 if first_yamc_model is None and "model" in captured:
                     first_yamc_model = captured["model"]
