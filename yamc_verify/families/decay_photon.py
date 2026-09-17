@@ -129,8 +129,19 @@ def run_openmc_d1s(nuclide, neutron_path, element, photon_path, task: Task):
     }
 
 
-def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, compute="cpu"):
-    """Run YAMC D1S simulation. Returns (results_dict, model)."""
+def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, compute="cpu",
+                 parent_nuclides=None):
+    """Run YAMC D1S simulation. Returns (results_dict, model).
+
+    ``parent_nuclides`` restricts the decay-photon tally (and therefore the
+    time correction) to the emitters in the list. yamc follows every decay
+    chain from the activation products, so its default emitter set carries the
+    daughters (Fr, At, Bi, Po, Pb, ... for the Ac isotopes); OpenMC's D1S
+    time-corrects the direct activation products only and never emits a
+    daughter's photons. Passing OpenMC's radionuclide list here makes the two
+    codes answer the same question (fusion-neutronics/core#27); ``None`` keeps
+    yamc's full-chain answer.
+    """
     import shutil
     import tempfile
 
@@ -183,6 +194,14 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
         radionuclides = mc.Model(
             geometry=geometry, source=source, verbose=[],
         ).radionuclides()
+        full_chain_count = len(radionuclides)
+        if parent_nuclides is not None:
+            wanted = set(parent_nuclides)
+            missing = sorted(wanted - set(radionuclides))
+            radionuclides = [r for r in radionuclides if r in wanted]
+            print(f"    restricting yamc to the {len(radionuclides)} direct products "
+                  f"({full_chain_count} in the full chains)"
+                  + (f"; OpenMC lists {missing} which yamc does not produce" if missing else ""))
 
         tally = mc.Tally(
             scores=['flux'],
@@ -230,6 +249,8 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
         return {
             'backend': f'yamc-{compute}',
             'radionuclides': radionuclides,
+            'full_chain_radionuclides': full_chain_count,
+            'direct_products_only': parent_nuclides is not None,
             'energy_bins': energy_bins,
             'spectra': spectra,
             'spectra_std': spectra_std,
@@ -547,11 +568,21 @@ def _openmc_meta(task: Task) -> dict:
     return meta
 
 
+def direct_products_only() -> bool:
+    """Whether yamc's D1S tally is restricted to OpenMC's direct activation
+    products (``YAMC_VERIFY_D1S_DIRECT_ONLY=1``), the like-for-like comparison
+    of fusion-neutronics/core#27. Off by default: yamc's full-chain answer is the
+    more complete physics and stays the reported one."""
+    return os.environ.get("YAMC_VERIFY_D1S_DIRECT_ONLY", "") == "1"
+
+
 def _yamc_meta(task: Task) -> dict:
-    """YAMC D1S cache metadata: the OpenMC meta plus the build fingerprint."""
+    """YAMC D1S cache metadata: the OpenMC meta plus the build fingerprint, and
+    whether the emitter set was restricted to the direct products."""
     from cache_utils import yamc_fingerprint
 
-    return {**_openmc_meta(task), **yamc_fingerprint()}
+    return {**_openmc_meta(task), **yamc_fingerprint(),
+            "direct_products_only": direct_products_only()}
 
 
 def run_all(task: Task, backends=None, cache_dir: str = "cache"):
@@ -600,9 +631,16 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
         for compute in b.computes:
             captured = {}
 
+            # Like-for-like with OpenMC D1S (fusion-neutronics/core#27): restrict
+            # yamc's emitters to the direct products OpenMC time-corrects. Needs
+            # the OpenMC result for the list; without one yamc runs its full chains.
+            restrict_to = (openmc_result['radionuclides']
+                           if direct_products_only() and openmc_result is not None else None)
+
             def _run(n=nuclide, npath=neutron_path, el=element, ppath=photon_path,
-                     c=compute, cap=captured):
-                res, model = run_yamc_d1s(n, npath, el, ppath, task, compute=c)
+                     c=compute, cap=captured, parents=restrict_to):
+                res, model = run_yamc_d1s(n, npath, el, ppath, task, compute=c,
+                                          parent_nuclides=parents)
                 cap["model"] = model
                 return res
 
