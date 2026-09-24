@@ -243,3 +243,12 @@ Check the per-task log the orchestrator prints on failure. Common issues:
 
 - Missing nuclear data files (correct the data path used).
 - OpenMC or YAMC not installed in the virtual environment.
+
+## Licence
+
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.
