@@ -1,0 +1,88 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # numpy and plotly only, not requirements.txt. The tests reach
+      # yamc_verify.plotting, which imports those two and nothing else.
+      # requirements.txt also names openmc and openmc_data, which are a large
+      # download and a nuclear-data dependency that no test here needs: these
+      # tests drive the grading metric with arrays they build themselves.
+      - name: Install what the tests need
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy plotly pytest
+
+      - name: Run the tests
+        run: python -m pytest tests/ -q
+
+      - name: The tests must actually be running
+        shell: bash
+        run: |
+          # A suite that silently collects nothing passes. That is the failure
+          # this job exists to end: tests/ was written for #59 and then never
+          # run by any workflow, because the only workflow in this repo
+          # deploys the page on a push to main. A green check over an empty
+          # collection would put it straight back.
+          count=$(python -m pytest tests/ --collect-only -q \
+                  | grep -oE '^[0-9]+ tests? collected' | grep -oE '^[0-9]+' || echo 0)
+          if [ "${count:-0}" -lt 1 ]; then
+            echo "::error::pytest collected no tests"
+            exit 1
+          fi
+          echo "${count} tests collected"
+
+  index:
+    name: The cache must still build an index
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # The same three the deploy installs, for the same reason.
+      - name: Install build deps
+        run: pip install numpy pandas plotly
+
+      # Most changes here are committed cache JSON, and the deploy's only real
+      # build step is this one. Without it a malformed or truncated result file
+      # merges green and takes the page down on main instead, where the failure
+      # is a deploy rather than a review comment.
+      - name: Build the index
+        run: python -m yamc_verify.index_builder --out /tmp/benchmarks-index.json
+
+      - name: The index must describe something
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, sys
+          index = json.load(open("/tmp/benchmarks-index.json"))
+          benchmarks = index.get("benchmarks") or []
+          unindexed = index.get("unindexed_cache_dirs") or []
+          print(f"{len(benchmarks)} benchmarks indexed")
+          if len(benchmarks) < 1:
+              sys.exit("::error::the index names no benchmarks")
+          if unindexed:
+              # A cache directory the task registry does not know about is
+              # either a typo in a new path or a task that was removed and
+              # left its results behind. Both are worth seeing in review.
+              print("::warning::cache directories no task claims: "
+                    + ", ".join(map(str, unindexed)))
+          PY
