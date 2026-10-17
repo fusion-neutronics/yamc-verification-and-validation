@@ -59,11 +59,12 @@ _SPHERE = GeometryDims(sphere_radius=35.0)
 _BROOM = GeometryDims(cylinder_radius=1.0, cylinder_half_height=50.0)
 
 # Depletion-chain reduction depth, shared by every task that reduces the chain
-# (transmutation reaction-rate and flux-spectrum, and the D1S decay-photon YAMC
-# side). Kept as one constant so the level is 4 everywhere and cannot drift into
-# a mix of levels across tasks. `reduce_level` is part of each task's cache
-# metadata, so changing this here invalidates the affected cache and any re-run
-# regenerates at the new level (no mixed-level cache).
+# (transmutation reaction-rate and flux-spectrum). Kept as one constant so the
+# level is 4 everywhere and cannot drift into a mix of levels across tasks.
+# `reduce_level` is part of each task's cache metadata, so changing this here
+# invalidates the affected cache and any re-run regenerates at the new level (no
+# mixed-level cache). The decay-photon tasks do not reduce: both codes read the
+# library's full chain there.
 _REDUCE_LEVEL = 4
 
 _TASKS: list[Task] = []
@@ -134,7 +135,7 @@ for _geom, _dims, _nb in (("sphere", _SPHERE, "sphere"), ("broomstick", _BROOM, 
          family="decay-photon", geometry=_geom, library="endf-b8.1",
          label=f"decay-photon {_geom}", item_kind="nuclide", codes=_mc_codes(),
          caches_yamc=True, particles=5_000_000, batches=10, source_energy=14.06e6, dims=_dims,
-         extras={"photon_group_structure": "VITAMIN-J-42", "reduce_level": _REDUCE_LEVEL,
+         extras={"photon_group_structure": "VITAMIN-J-42",
                  "timesteps": [3600.0, 3600.0, 3600.0, 15 * 86400.0, 15 * 86400.0],
                  "source_rates": [1.0, 1.0, 1.0, 0.0, 0.0],
                  "phases": ["irrad", "irrad", "irrad", "cool", "cool"]})

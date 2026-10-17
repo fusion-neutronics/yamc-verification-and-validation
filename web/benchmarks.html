@@ -295,7 +295,9 @@
          D1S attributes decay gammas only to the directly activated nuclide and misses
          the gammas emitted by those subsequent decay products. Expect YAMC to show
          additional decay-photon flux and lines from the daughter nuclides; that extra
-         signal is real physics OpenMC's D1S omits.</p>
+         signal is real physics OpenMC's D1S omits. Neither code reduces the depletion
+         chain here: both read the library's full chain, so YAMC follows each daughter
+         to the end of its decay chain.</p>
 
       <h4>Photon heating / KERMA tallies (secondary-photon benchmarks)</h4>
       <p>Wherever photon heating is compared (the secondary-photon benchmarks), neither
