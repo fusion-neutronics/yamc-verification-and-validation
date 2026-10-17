@@ -11,16 +11,51 @@ environment variables.
 from __future__ import annotations
 
 import contextlib
+import functools
 import glob
 import os
 import re
 import shutil
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from cache_utils import requested_items, select_requested
 
 _SINGLE_NUCLIDE_RE = re.compile(r"[A-Z][a-z]?\d+")
+
+
+@functools.lru_cache(maxsize=None)
+def _cross_sections_index(nuclear_data_dir: str) -> dict:
+    """``{data type: {material name: absolute HDF5 path}}`` from ``cross_sections.xml``."""
+    path = os.path.join(nuclear_data_dir, "cross_sections.xml")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"No cross_sections.xml in {nuclear_data_dir}. OpenMC finds a library's "
+            f"data through that file; check NUCLEAR_DATA_DIR in yamc_verify/tasks.py."
+        )
+    index: dict = {}
+    for library in ET.parse(path).getroot().findall("library"):
+        kind = index.setdefault(library.get("type"), {})
+        full = os.path.join(nuclear_data_dir, library.get("path"))
+        for name in (library.get("materials") or "").split():
+            # A name listed twice keeps its first file. The IAEA FENDL-3.2d
+            # library lists H1 and Li7 twice, each time with identical files.
+            kind.setdefault(name, full)
+    return index
+
+
+def openmc_library(nuclear_data_dir: str, kind: str) -> dict[str, str]:
+    """The ``{name: HDF5 path}`` entries of one data type in an OpenMC library.
+
+    OpenMC finds a nuclide's or element's data through the library's
+    ``cross_sections.xml``, not by file name, and libraries lay their files out
+    differently: the OpenMC-built ENDF/B-VIII.1 keeps ``neutron/Fe56.h5``, while
+    the IAEA's FENDL-3.2d keeps ``neutron/hdf5/Fe56.h5`` beside
+    ``neutron/hdf5/01H_001.h5``. So discovery reads the same file OpenMC does.
+    ``kind`` is a ``cross_sections.xml`` type: ``"neutron"`` or ``"photon"``.
+    """
+    return dict(_cross_sections_index(os.path.abspath(nuclear_data_dir)).get(kind, {}))
 
 
 def _yamc_cache_dir() -> Path:
@@ -66,15 +101,14 @@ def _arrow_cache_nuclides(library: str) -> list[str]:
 def discover_neutron_nuclides(nuclear_data_dir: str, library: str, run_openmc: bool) -> list[str]:
     """Discover the neutron-transport nuclide list.
 
-    When OpenMC runs, the HDF5 directory is the source of truth (OpenMC needs
-    data too). Otherwise fall back to the local yamc Arrow cache.
+    When OpenMC runs, its library is the source of truth (OpenMC needs data
+    too). Otherwise fall back to the local yamc Arrow cache.
     """
     if run_openmc:
-        h5_files = sorted(glob.glob(os.path.join(nuclear_data_dir, "neutron", "*.h5")))
-        nuclides = [os.path.splitext(os.path.basename(f))[0] for f in h5_files]
+        nuclides = sorted(openmc_library(nuclear_data_dir, "neutron"))
         if not nuclides:
             raise FileNotFoundError(
-                f"No HDF5 files found in {nuclear_data_dir}neutron/\n"
+                f"No neutron data listed in {nuclear_data_dir}cross_sections.xml\n"
                 f"Check the nuclear data directory for library {library!r}."
             )
     else:
@@ -101,11 +135,10 @@ def discover_photon_elements(nuclear_data_dir: str, library: str, run_openmc: bo
     """Discover elements with photon data that yamc can build from natural abundance."""
     import yamc
 
-    photon_dir = os.path.join(nuclear_data_dir, "photon")
-    photon_files = sorted(glob.glob(os.path.join(photon_dir, "*.h5")))
-    elements = [os.path.splitext(os.path.basename(f))[0] for f in photon_files]
+    elements = sorted(openmc_library(nuclear_data_dir, "photon"))
     if not elements:
-        raise FileNotFoundError(f"No photon data files found in {photon_dir}")
+        raise FileNotFoundError(
+            f"No photon data listed in {nuclear_data_dir}cross_sections.xml")
     # Drop synthetic / no-natural-abundance elements yamc cannot expand.
     supported = []
     for e in elements:
@@ -129,16 +162,16 @@ def discover_coupled_nuclides(nuclear_data_dir: str, library: str, run_openmc: b
     photon_dir = os.path.join(nuclear_data_dir, "photon")
     nuclides: list[tuple] = []
     if run_openmc:
-        for f in sorted(glob.glob(os.path.join(neutron_dir, "*.h5"))):
-            name = os.path.splitext(os.path.basename(f))[0]
+        photon = openmc_library(nuclear_data_dir, "photon")
+        for name, npath in sorted(openmc_library(nuclear_data_dir, "neutron").items()):
             if "_m" in name:
                 continue
             element = element_from_nuclide(name)
-            photon_path = os.path.join(photon_dir, f"{element}.h5")
-            if os.path.exists(photon_path):
-                nuclides.append((name, f, element, photon_path))
+            if element in photon:
+                nuclides.append((name, npath, element, photon[element]))
         if not nuclides:
-            raise FileNotFoundError(f"No coupled nuclides found in {neutron_dir}")
+            raise FileNotFoundError(
+                f"No coupled nuclides listed in {nuclear_data_dir}cross_sections.xml")
     else:
         for name in _arrow_cache_nuclides(library):
             if "_m" in name:
@@ -308,17 +341,15 @@ def discover_d1s_nuclides(nuclear_data_dir: str, library: str, chain_file: str,
             if target and target != "None" and target in half_lives and target in photon_sources:
                 d1s_parents.add(parent)
 
-    neutron_dir = os.path.join(nuclear_data_dir, "neutron")
-    photon_dir = os.path.join(nuclear_data_dir, "photon")
+    neutron = openmc_library(nuclear_data_dir, "neutron")
+    photon = openmc_library(nuclear_data_dir, "photon")
     result: list[tuple] = []
-    for f in sorted(glob.glob(os.path.join(neutron_dir, "*.h5"))):
-        name = os.path.splitext(os.path.basename(f))[0]
+    for name, npath in sorted(neutron.items()):
         if "_m" in name or name not in d1s_parents:
             continue
         element = element_from_nuclide(name)
-        photon_path = os.path.join(photon_dir, f"{element}.h5")
-        if os.path.exists(photon_path):
-            result.append((name, f, element, photon_path))
+        if element in photon:
+            result.append((name, npath, element, photon[element]))
 
     # Explicitly requested nuclides bypass the D1S-signature filter: naming a
     # nuclide means "run it", even one whose activation products emit no decay
@@ -330,11 +361,9 @@ def discover_d1s_nuclides(nuclear_data_dir: str, library: str, chain_file: str,
     for name in requested_items("nuclide"):
         if name in have or "_m" in name:
             continue
-        npath = os.path.join(neutron_dir, f"{name}.h5")
         element = element_from_nuclide(name)
-        ppath = os.path.join(photon_dir, f"{element}.h5")
-        if os.path.exists(npath) and os.path.exists(ppath):
-            result.append((name, npath, element, ppath))
+        if name in neutron and element in photon:
+            result.append((name, neutron[name], element, photon[element]))
             have.add(name)
 
     if not result:
@@ -382,15 +411,20 @@ def discover_stable_nuclides(nuclear_data_dir: str, library: str, chain_file: st
     """
     stable = stable_nuclide_names(library, run_openmc, chain_file, transmutation_data)
     neutron_dir = os.path.join(nuclear_data_dir, "neutron")
+    # The OpenMC library's neutron entries, when this machine has the library.
+    if os.path.isfile(os.path.join(nuclear_data_dir, "cross_sections.xml")):
+        neutron = openmc_library(nuclear_data_dir, "neutron")
+    else:
+        neutron = {}
     if run_openmc and os.path.exists(chain_file):
         names = []
-        for f in sorted(glob.glob(os.path.join(neutron_dir, "*.h5"))):
-            name = os.path.splitext(os.path.basename(f))[0]
+        for name, npath in sorted(neutron.items()):
             if "_m" in name or name not in stable:
                 continue
-            names.append((name, f) if return_paths else name)
+            names.append((name, npath) if return_paths else name)
         if not names:
-            raise FileNotFoundError(f"No stable nuclides found in chain from {neutron_dir}")
+            raise FileNotFoundError(
+                f"No stable nuclides of the chain listed in {nuclear_data_dir}cross_sections.xml")
     else:
         names = []
         for name in _arrow_cache_nuclides(library):
@@ -410,9 +444,8 @@ def discover_stable_nuclides(nuclear_data_dir: str, library: str, chain_file: st
     for name in requested_items("nuclide"):
         if name in have or "_m" in name:
             continue
-        npath = os.path.join(neutron_dir, f"{name}.h5")
-        if os.path.exists(npath):
-            names.append((name, npath) if return_paths else name)
+        if name in neutron:
+            names.append((name, neutron[name]) if return_paths else name)
             have.add(name)
 
     key = (lambda t: t[0]) if return_paths else None

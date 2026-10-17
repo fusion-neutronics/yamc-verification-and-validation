@@ -18,7 +18,8 @@ NUCLEAR_DATA_DIR = {
     "endf-b8.1": "/home/jon/nuclear_data/endf-b8.1-hdf5/endfb-viii.1-hdf5/",
     "endf-b8.0": "/home/jon/nuclear_data/endf-b8.0-hdf5/",
     "tendl-2021": "/home/jon/nuclear_data/tendl-2021-hdf5/tendl-2021-hdf5/",
-    "fendl-3.2c": "/home/jon/nuclear_data/fendl-3.2c-hdf5/",
+    # The IAEA's HDF5 build of FENDL-3.2d (fendl-3.2d-T1-hdf5.zip), unpacked as is.
+    "fendl-3.2d": "/home/jon/nuclear_data/fendl-3.2d-hdf5/",
 }
 
 
@@ -30,7 +31,7 @@ class Task:
     notebook: str                 # repo-relative .ipynb path
     family: str                   # neutron | photon | secondary-photon | decay-photon | transmutation
     geometry: str                 # sphere | broomstick | material
-    library: str                  # endf-b8.1 | fendl-3.2c
+    library: str                  # endf-b8.1 | fendl-3.2d
     label: str                    # dashboard label, e.g. "neutron sphere"
     item_kind: str                # nuclide | element
     codes: tuple[str, ...]        # superset of code labels this task can run
@@ -75,7 +76,7 @@ def _reg(**kw):
 
 
 # ---- neutron (nuclide; caches YAMC) ---------------------------------------
-for _lib, _parts in (("endf-b8.1", 5_000_000), ("fendl-3.2c", 500_000)):
+for _lib, _parts in (("endf-b8.1", 5_000_000), ("fendl-3.2d", 500_000)):
     _reg(key=f"neutron/sphere/{_lib}", notebook=f"tasks/neutron/sphere/{_lib}.ipynb",
          family="neutron", geometry="sphere", library=_lib, label="neutron sphere",
          item_kind="nuclide", codes=_mc_codes(), caches_yamc=True,
@@ -102,7 +103,7 @@ _reg(key="neutron/multimaterial-slab/endf-b8.1",
      particles=2_000_000, batches=5, source_energy=14.06e6, dims=_SPHERE)
 
 # ---- photon (element; caches YAMC) ----------------------------------------
-for _lib, _parts in (("endf-b8.1", 5_000_000), ("fendl-3.2c", 500_000)):
+for _lib, _parts in (("endf-b8.1", 5_000_000), ("fendl-3.2d", 500_000)):
     _reg(key=f"photon/sphere/{_lib}", notebook=f"tasks/photon/sphere/{_lib}.ipynb",
          family="photon", geometry="sphere", library=_lib, label="photon sphere",
          item_kind="element", codes=_mc_codes(), caches_yamc=True,
