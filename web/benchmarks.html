@@ -270,18 +270,19 @@
          treating a disagreement as an error.</p>
 
       <h4>Depletion chain reduction (transmutation benchmarks)</h4>
-      <p>YAMC and OpenMC interpret the depletion "reduce" level differently, so
-         low-density nuclides can differ. YAMC's <code>reduce_transport_chain</code>
-         bounds <em>only</em> which product nuclides get cross sections loaded for
-         neutron transport; the burnup (Bateman) equations are always solved on the
-         <em>full</em> decay network. That solve is cheap (sparse CRAM) and exact, so
-         nothing is saved by trimming it and no accuracy is lost by keeping it.
-         OpenMC's <code>Chain.reduce</code> instead prunes the <em>whole</em> network
-         (transport, decay, and the Bateman matrix together), so at a low level it drops
-         decay-fed nuclides entirely.</p>
+      <p>OpenMC runs both transmutation benchmarks on a depletion chain reduced to
+         four steps from the seed. Its <code>Chain.reduce</code> prunes the
+         <em>whole</em> network (transport, decay, and the Bateman matrix together), so
+         it drops decay-fed nuclides beyond that reach entirely. On the reaction-rate
+         benchmark YAMC solves the burnup (Bateman) equations on the <em>full</em> decay
+         network instead. Its <code>product_threshold</code> (default 10<sup>-12</sup>)
+         decides only which products have their cross sections loaded and their own
+         neutron reactions solved: a product below it is still produced, decays and is
+         reported. On the flux-spectrum benchmark YAMC reduces its chain the same way
+         as OpenMC, to four steps from the seed.</p>
       <p>The consequence is analytic, not a coincidence: any nuclide that appears in
-         YAMC's result but lies <em>outside</em> OpenMC's reduced chain is one OpenMC
-         cannot produce by construction. Where the codes disagree on such a
+         YAMC's reaction-rate result but lies <em>outside</em> OpenMC's reduced chain is
+         one OpenMC cannot produce by construction. Where the codes disagree on such a
          low-density, decay-fed nuclide, <strong>YAMC is the more complete result and
          OpenMC has truncated a real decay pathway</strong>. It is not YAMC being
          wrong. The dominant, physically significant nuclides agree closely; the
