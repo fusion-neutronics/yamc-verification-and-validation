@@ -10,9 +10,11 @@ environment variables.
 """
 from __future__ import annotations
 
+import contextlib
 import glob
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -218,6 +220,52 @@ def transmutation_data_path(library: str) -> str:
         if target.is_dir() and not link.exists():
             link.symlink_to(target, target_is_directory=True)
     return str(root)
+
+
+# The yamc settings the transmutation network is assembled from.
+_NETWORK_SETTINGS = (
+    "transmutation_decay_data",
+    "transmutation_reactions",
+    "transmutation_fission_yields",
+)
+
+
+@contextlib.contextmanager
+def transmutation_network(source: str):
+    """Point yamc's transmutation network at ``source`` for the duration.
+
+    yamc takes no per-call chain: ``Model.simulate_transmutation``,
+    ``Material.transmute``, ``Model.radionuclides`` and the D1S time correction
+    all assemble the network from the global decay, reactions and fission-yield
+    settings. ``source`` is a library keyword, or a chain root holding
+    ``decay/``, ``reactions/`` and ``fission_yields/`` (what
+    ``TransmutationChain.export_to_arrow`` writes). All three settings are
+    pointed at it and reset to yamc's default library afterwards.
+    """
+    import yamc as mc
+
+    for name in _NETWORK_SETTINGS:
+        setattr(mc, name, source)
+    try:
+        yield
+    finally:
+        for name in _NETWORK_SETTINGS:
+            setattr(mc, name, None)
+
+
+@contextlib.contextmanager
+def exported_chain(chain, nuclide: str):
+    """Write ``chain`` to a fresh chain root and yield its path, removed after.
+
+    The path is new on every call because yamc caches a parsed chain by its
+    path: reusing one would hand the next nuclide the previous one's chain.
+    """
+    root = tempfile.mkdtemp(prefix=f"yamc_chain_{nuclide}_", suffix=".chain.arrow")
+    try:
+        chain.export_to_arrow(root)
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def _d1s_chain_maps(chain_file: str, transmutation_data: str):
