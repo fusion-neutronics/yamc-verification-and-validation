@@ -67,7 +67,8 @@ def run_openmc_simulation(nuclide: str, task: Task) -> dict:
     cell1 = mc.Cell(cell_id=1, name="inner_sphere", region=region1, fill=material1)
     geometry = mc.Geometry([cell1])
 
-    in_neu = mc.data.IncidentNeutron.from_hdf5(f"{task.nuclear_data_dir}neutron/{nuclide}.h5")
+    in_neu = mc.data.IncidentNeutron.from_hdf5(
+        discovery.openmc_library(task.nuclear_data_dir, "neutron")[nuclide])
     mts_int = [mt for mt in in_neu.reactions.keys() if mt not in (1, 3, 4, 27, 101)]
     mts = [str(mt) for mt in mts_int]
 

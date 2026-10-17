@@ -159,7 +159,11 @@ def run_yamc_simulation(element: str, task: Task, compute: str = "cpu"):
         temperature=294,
         id=1,
     )
-    material.read_nuclear_data(task.library)
+    # The photon data come from the task's library too. yamc otherwise takes
+    # photon data from endf-b8.1 whatever the neutron library, for its atomic
+    # relaxation tables, while OpenMC reads the task library's own photon files:
+    # on FENDL-3.2d the two codes would then transport on different photon data.
+    material.read_nuclear_data(task.library, photon_data={element: task.library})
 
     cell = mc.Cell(id=1, name=task.geometry, region=region, material=material)
     geometry = mc.Geometry([cell])
