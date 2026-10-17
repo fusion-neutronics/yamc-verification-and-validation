@@ -9,7 +9,8 @@ YAMC is silenced with ``verbose=[]`` and OpenMC with ``verbosity=1`` +
 The D1S workflow runs a coupled neutron+decay-photon transport, then
 time-corrects the parent-nuclide-binned photon flux tally into a per-timestep
 shutdown-dose spectrum (OpenMC via ``openmc.deplete.d1s``; YAMC via a
-``PulseSchedule`` of ``Pulse``/``Cooldown`` steps). Metrics and plots are
+``PulseSchedule`` of ``Pulse``/``Cooldown`` steps). Both codes read the
+library's full depletion chain; neither reduces it. Metrics and plots are
 per-timestep and therefore D1S-specific; they live in this module.
 """
 from __future__ import annotations
@@ -48,8 +49,9 @@ def run_openmc_d1s(nuclide, neutron_path, element, photon_path, task: Task):
 
     openmc.reset_auto_ids()
     openmc.config['cross_sections'] = os.path.join(task.nuclear_data_dir, 'cross_sections.xml')
-    # OpenMC keeps the full chain - its fission-product-yield borrowing needs
-    # nuclides outside any small reduce(...) reach.
+    # The library's full depletion chain, unreduced, as on the yamc side
+    # (run_yamc_d1s). The radionuclide list and the decay-photon sources come
+    # from it.
     openmc.config['chain_file'] = chain_file
 
     material = openmc.Material()
@@ -144,8 +146,6 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
     """
     import yamc as mc
 
-    transmutation_data = discovery.transmutation_data_path(task.library)
-    reduce_level = task.extras["reduce_level"]
     timesteps = task.extras["timesteps"]
     source_rates = task.extras["source_rates"]
 
@@ -168,23 +168,12 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
         energy=mc.sources.Discrete([task.source_energy], [1.0]),
     )
 
-    # Reduce the YAMC transmutation network to nuclides reachable from the seed
-    # (matches OpenMC's chain.reduce(...)), write it to a chain root and point
-    # yamc's transmutation settings at it, so radionuclides(), the decay-photon
-    # transport and the time correction all read it.
-    #
-    # The chain root MUST be unique per nuclide: yamc caches the transmutation
-    # chain by path, so reusing one path (as this once did) made every nuclide
-    # after the first silently reuse the first nuclide's reduced chain.
-    # radionuclides() then resolved this material's activation products against
-    # the wrong chain and came back empty, zeroing the decay-photon result.
-    # exported_chain gives each call a fresh root and removes it once the tally
-    # is time-corrected (the chain is needed through that call), and the
+    # yamc's transmutation network is the library's full chain, unreduced, as
+    # OpenMC's chain_file is (run_openmc_d1s). radionuclides(), the decay-photon
+    # transport and the time correction all read it, so every activation
+    # product's daughters are followed to the end of their decay chains. The
     # settings go back to yamc's default library on the way out.
-    yamc_chain = mc.TransmutationChain(transmutation_data)
-    yamc_reduced = yamc_chain.reduce([nuclide], level=reduce_level)
-    with discovery.exported_chain(yamc_reduced, nuclide) as chain_root, \
-            discovery.transmutation_network(chain_root):
+    with discovery.transmutation_network(task.library):
         # Unstable activation products reachable from this model's materials.
         radionuclides = mc.Model(
             geometry=geometry, source=source, verbose=[],
@@ -570,12 +559,15 @@ def direct_products_only() -> bool:
 
 
 def _yamc_meta(task: Task) -> dict:
-    """YAMC D1S cache metadata: the OpenMC meta plus the build fingerprint, and
-    whether the emitter set was restricted to the direct products."""
+    """YAMC D1S cache metadata: the OpenMC meta plus the build fingerprint,
+    whether the emitter set was restricted to the direct products, and the chain
+    yamc's network read (``"full"``, the library's chain unreduced). A result
+    cached without that key may come from a reduced chain, so it re-runs."""
     from cache_utils import yamc_fingerprint
 
     return {**_openmc_meta(task), **yamc_fingerprint(),
-            "direct_products_only": direct_products_only()}
+            "direct_products_only": direct_products_only(),
+            "yamc_chain": "full"}
 
 
 def run_all(task: Task, backends=None, cache_dir: str = "cache"):
