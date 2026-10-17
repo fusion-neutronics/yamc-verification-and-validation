@@ -4,3 +4,7 @@ pandas
 plotly>=5.0.0
 openmc
 openmc_data>=2.4.0
+# yamc itself (the compiled core wheel provides the `yamc` module). 0.16.0 is
+# the floor because discovery finds yamc's downloaded data through
+# yamc.cache_dir() and its <library>/<release>/ cache layout, both new there.
+yamc-core>=0.16.0

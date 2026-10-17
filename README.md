@@ -9,7 +9,9 @@ Monte Carlo code, OpenMC.
 pip install -r requirements.txt
 ```
 
-YAMC is used as an editable install from a sibling `yamc` checkout (`../yamc`).
+This installs yamc from PyPI as the `yamc-core` wheel, 0.16.0 or newer. To verify
+yamc changes that are not released yet, build the core into the same environment
+instead (see [Using the latest yamc](#using-the-latest-yamc)).
 
 ## Running the verification models
 
@@ -150,11 +152,11 @@ invalidation policies:
 - **OpenMC** results are keyed by the run parameters only (library, particles,
   batches, source energy). OpenMC is fixed, so these stay valid until a parameter
   changes.
-- **YAMC** results are additionally keyed by the **yamc version and git commit**
-  (`cache_utils.yamc_fingerprint()`). Rebuilding or updating yamc auto-invalidates
-  the cache and the affected simulations re-run on the next run. On a wheel
-  install with no git checkout the commit is `null` and invalidation falls back to
-  the version.
+- **YAMC** results are additionally keyed by the **yamc version and a content hash
+  of its compiled extension** (`cache_utils.yamc_fingerprint()`, stored as
+  `yamc_version` and `yamc_core_sha`). Installing another yamc release or
+  rebuilding the core auto-invalidates the cache and the affected simulations
+  re-run on the next run.
 
 To force everything to re-run, delete the cache directories:
 
@@ -182,16 +184,18 @@ compare)".
 
 ## Using the latest yamc
 
-YAMC is used as an editable install, but its compiled Rust core is only rebuilt
-on demand. After pulling new yamc changes, rebuild the core so the runs pick them
-up:
+yamc's compiled core is built from the
+[fusion-neutronics/core](https://github.com/fusion-neutronics/core) repository. To
+run the verification against core changes that are not released yet, install the
+core from a sibling checkout into this environment, and run it again after
+pulling or changing Rust code:
 
 ```bash
-cd ../yamc && maturin develop --release
+pip install -e ../core/packages/yamc-core
 ```
 
-Run this from your `yamc` checkout in an environment that has `maturin`; it updates
-the editable extension the runs import.
+The build replaces the PyPI wheel, and its new extension hash re-keys the YAMC
+cache (see [Results cache](#results-cache)).
 
 ## The benchmark database page (the site)
 
