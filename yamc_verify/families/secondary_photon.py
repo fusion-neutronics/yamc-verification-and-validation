@@ -762,8 +762,15 @@ def discover(task: Task, run_openmc: bool) -> list[tuple]:
     return discovery.discover_coupled_nuclides(task.nuclear_data_dir, task.library, run_openmc)
 
 
-def _metas(task: Task, electron_treatment: str):
-    from cache_utils import yamc_fingerprint
+def _metas(task: Task, electron_treatment: str, *, openmc_build: bool):
+    """OpenMC + YAMC cache metas for one electron treatment.
+
+    The YAMC meta folds in ``yamc_fingerprint()``. With ``openmc_build`` the
+    OpenMC meta also folds in ``openmc_fingerprint()``, so a reference made by
+    another OpenMC build re-runs. It is asked for only when OpenMC runs, so a
+    yamc-only run needs no OpenMC.
+    """
+    from cache_utils import openmc_fingerprint, yamc_fingerprint
 
     openmc_meta = {
         "library": task.library,
@@ -780,6 +787,8 @@ def _metas(task: Task, electron_treatment: str):
         openmc_meta["cylinder_radius"] = task.dims.cylinder_radius
         openmc_meta["cylinder_half_height"] = task.dims.cylinder_half_height
     yamc_meta = {**openmc_meta, **yamc_fingerprint()}
+    if openmc_build:
+        openmc_meta = {**openmc_meta, **openmc_fingerprint()}
     return openmc_meta, yamc_meta
 
 
@@ -813,7 +822,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
         # so both live side by side; the result keys carry the treatment suffix
         # and `display_results` groups by treatment.
         for treatment in treatments:
-            openmc_meta, yamc_meta = _metas(task, treatment)
+            openmc_meta, yamc_meta = _metas(task, treatment, openmc_build=b.run_openmc)
 
             if b.run_openmc:
                 try:

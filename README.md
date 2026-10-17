@@ -149,9 +149,13 @@ Simulation results are cached as JSON under
 so re-running a task does not repeat simulations that are already cached. Two
 invalidation policies:
 
-- **OpenMC** results are keyed by the run parameters only (library, particles,
-  batches, source energy). OpenMC is fixed, so these stay valid until a parameter
-  changes.
+- **OpenMC** results are keyed by the run parameters (library, particles,
+  batches, source energy), so they stay valid until a parameter changes. The
+  photon-bearing families (photon, secondary-photon, decay-photon) are also keyed
+  by the **OpenMC build** (`cache_utils.openmc_fingerprint()`, stored as
+  `openmc_version` and `openmc_commit` from `openmc --version`): their photon
+  references changed with openmc#4036, which corrected Compton shell selection
+  and Doppler broadening, so a reference made by another OpenMC build re-runs.
 - **YAMC** results are additionally keyed by the **yamc version and a content hash
   of its compiled extension** (`cache_utils.yamc_fingerprint()`, stored as
   `yamc_version` and `yamc_core_sha`). Installing another yamc release or

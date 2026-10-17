@@ -451,13 +451,16 @@ def discover(task: Task, run_openmc: bool) -> list[str]:
     return discovery.discover_photon_elements(task.nuclear_data_dir, task.library, run_openmc)
 
 
-def _metas(task: Task):
+def _metas(task: Task, *, openmc_build: bool):
     """OpenMC + YAMC cache metas, geometry-dependent to byte-match the notebooks.
 
     The YAMC meta folds in ``yamc_fingerprint()`` so the YAMC cache auto-
-    invalidates on a new yamc build (same policy as neutron).
+    invalidates on a new yamc build (same policy as neutron). With
+    ``openmc_build`` the OpenMC meta also folds in ``openmc_fingerprint()``, so
+    a reference made by another OpenMC build re-runs. It is asked for only when
+    OpenMC runs, so a yamc-only run needs no OpenMC.
     """
-    from cache_utils import yamc_fingerprint
+    from cache_utils import openmc_fingerprint, yamc_fingerprint
 
     openmc_meta = {
         "library": task.library,
@@ -471,6 +474,8 @@ def _metas(task: Task):
         openmc_meta["cylinder_radius"] = task.dims.cylinder_radius
         openmc_meta["cylinder_half_height"] = task.dims.cylinder_half_height
     yamc_meta = {**openmc_meta, **yamc_fingerprint()}
+    if openmc_build:
+        openmc_meta = {**openmc_meta, **openmc_fingerprint()}
     return openmc_meta, yamc_meta
 
 
@@ -485,7 +490,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
-    openmc_meta, yamc_meta = _metas(task)
+    openmc_meta, yamc_meta = _metas(task, openmc_build=b.run_openmc)
     elements = discover(task, b.run_openmc)
     print(f"Running photon simulations for {len(elements)} elements: {elements}")
 

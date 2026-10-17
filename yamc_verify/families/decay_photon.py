@@ -530,8 +530,15 @@ def discover(task: Task, run_openmc: bool) -> list[tuple]:
         task.nuclear_data_dir, task.library, chain_file, transmutation_data)
 
 
-def _openmc_meta(task: Task) -> dict:
-    """OpenMC cache metadata (byte-matching the notebook's OPENMC_CACHE_META)."""
+def _openmc_meta(task: Task, *, openmc_build: bool) -> dict:
+    """OpenMC cache metadata (byte-matching the notebook's OPENMC_CACHE_META).
+
+    With ``openmc_build`` it also folds in ``openmc_fingerprint()``, so a
+    reference made by another OpenMC build re-runs. The YAMC meta builds on the
+    rest of it without the OpenMC build, and a yamc-only run needs no OpenMC.
+    """
+    from cache_utils import openmc_fingerprint
+
     meta = {
         "library": task.library,
         "particles": task.particles,
@@ -547,6 +554,8 @@ def _openmc_meta(task: Task) -> dict:
     meta["chain_file"] = discovery.resolve_openmc_chain(task.library)
     meta["d1s_timesteps"] = list(task.extras["timesteps"])
     meta["d1s_source_rates"] = list(task.extras["source_rates"])
+    if openmc_build:
+        meta.update(openmc_fingerprint())
     return meta
 
 
@@ -565,7 +574,7 @@ def _yamc_meta(task: Task) -> dict:
     cached without that key may come from a reduced chain, so it re-runs."""
     from cache_utils import yamc_fingerprint
 
-    return {**_openmc_meta(task), **yamc_fingerprint(),
+    return {**_openmc_meta(task, openmc_build=False), **yamc_fingerprint(),
             "direct_products_only": direct_products_only(),
             "yamc_chain": "full"}
 
@@ -581,7 +590,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
-    openmc_meta = _openmc_meta(task)
+    openmc_meta = _openmc_meta(task, openmc_build=b.run_openmc)
     yamc_meta = _yamc_meta(task)
     timesteps = task.extras["timesteps"]
     phases = task.extras["phases"]
