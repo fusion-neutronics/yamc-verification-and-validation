@@ -10,9 +10,12 @@ environment variables.
 """
 from __future__ import annotations
 
+import contextlib
 import glob
 import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
 
 from cache_utils import requested_items, select_requested
@@ -20,15 +23,39 @@ from cache_utils import requested_items, select_requested
 _SINGLE_NUCLIDE_RE = re.compile(r"[A-Z][a-z]?\d+")
 
 
+def _yamc_cache_dir() -> Path:
+    """yamc's nuclear-data cache directory (``yamc.cache_dir()``)."""
+    import yamc
+
+    return Path(yamc.cache_dir())
+
+
+def _cached_releases(library: str) -> list[Path]:
+    """The releases of ``library`` in yamc's cache, oldest first.
+
+    yamc caches each published release of a library in its own folder,
+    ``<yamc.cache_dir()>/<library>/<release>/``, laid out as the published tree
+    (``neutron/<Name>.arrow/``, ``photon/<El>.arrow/``,
+    ``transmutation/<subsection>.arrow/``) beside that release's
+    ``manifest.json``. Releases are named by date (``2026-10-10.1``), so the
+    lexically last folder holding a manifest is the newest.
+    """
+    return sorted(
+        d for d in (_yamc_cache_dir() / library).glob("*")
+        if d.is_dir() and (d / "manifest.json").is_file()
+    )
+
+
 def _arrow_cache_nuclides(library: str) -> list[str]:
-    """Single-nuclide names present in the local yamc Arrow cache for ``library``."""
-    yamc_cache = Path.home() / ".cache" / "yamc"
-    prefix = f"{library}-"
+    """Single-nuclide names downloaded into the newest cached release of ``library``."""
+    releases = _cached_releases(library)
+    if not releases:
+        return []
     names = []
-    for p in sorted(yamc_cache.glob(f"{prefix}*.arrow")):
+    for p in sorted((releases[-1] / "neutron").glob("*.arrow")):
         if not p.is_dir():
             continue
-        name = p.name[len(prefix):-len(".arrow")]
+        name = p.name[:-len(".arrow")]
         # Single-nuclide entries only (Ac225, Fe56, ...); drop natural-element
         # entries (Fe, U, ...) that have no mass number.
         if _SINGLE_NUCLIDE_RE.fullmatch(name):
@@ -54,7 +81,7 @@ def discover_neutron_nuclides(nuclear_data_dir: str, library: str, run_openmc: b
         nuclides = _arrow_cache_nuclides(library)
         if not nuclides:
             raise FileNotFoundError(
-                f"No yamc Arrow cache found at {Path.home() / '.cache' / 'yamc'} "
+                f"No yamc Arrow cache found at {_yamc_cache_dir() / library} "
                 f"for library {library!r}. Run yamc once on any nuclide to populate it."
             )
     # Skip metastable nuclides for transport.
@@ -148,9 +175,97 @@ def resolve_openmc_chain(library: str) -> str:
     return next((p for p in candidates if os.path.exists(p)), candidates[0])
 
 
+# The transmutation subsections ``yamc.TransmutationChain`` reads from a chain
+# root, each a folder of that name, with the section each must hold. yamc
+# downloads a release's files one by one as runs need them, so a subsection
+# folder can exist with only some of its files. ``branching`` is optional.
+_CHAIN_SUBSECTIONS = {
+    "decay": "nuclides.arrow",
+    "reactions": "reactions.arrow",
+    "fission_yields": "fission_yields.arrow",
+}
+_OPTIONAL_CHAIN_SUBSECTIONS = ("branching",)
+
+
 def transmutation_data_path(library: str) -> str:
-    """Path to the yamc transmutation-network Arrow file for ``library``."""
-    return os.path.expanduser(f"~/.cache/yamc/transmutation-{library}-sfr.arrow")
+    """Chain root of ``library``'s transmutation network, from yamc's cache.
+
+    yamc caches a release's transmutation subsections as
+    ``<yamc.cache_dir()>/<library>/<release>/transmutation/<subsection>.arrow/``,
+    while ``yamc.TransmutationChain`` reads a chain root holding ``decay/``,
+    ``reactions/``, ``fission_yields/`` and optionally ``branching/``. So this
+    links the newest cached release holding all three required subsections into
+    such a root, under the temporary directory and named by library and release,
+    and returns it. The path is stable for a given release, which matters
+    because yamc caches a parsed chain by its path.
+
+    The subsections are downloaded by any yamc run that transmutes with the
+    library's keyword. When no cached release holds them yet, this returns the
+    library's cache folder, which ``TransmutationChain`` refuses with a message
+    naming it; only the callers that read the yamc chain need it.
+    """
+    releases = [
+        d for d in _cached_releases(library)
+        if all((d / "transmutation" / f"{sub}.arrow" / section).is_file()
+               for sub, section in _CHAIN_SUBSECTIONS.items())
+    ]
+    if not releases:
+        return str(_yamc_cache_dir() / library)
+    release = releases[-1]
+    root = Path(tempfile.gettempdir()) / "yamc-verify-chains" / library / release.name
+    root.mkdir(parents=True, exist_ok=True)
+    for sub in (*_CHAIN_SUBSECTIONS, *_OPTIONAL_CHAIN_SUBSECTIONS):
+        target = release / "transmutation" / f"{sub}.arrow"
+        link = root / sub
+        if target.is_dir() and not link.exists():
+            link.symlink_to(target, target_is_directory=True)
+    return str(root)
+
+
+# The yamc settings the transmutation network is assembled from.
+_NETWORK_SETTINGS = (
+    "transmutation_decay_data",
+    "transmutation_reactions",
+    "transmutation_fission_yields",
+)
+
+
+@contextlib.contextmanager
+def transmutation_network(source: str):
+    """Point yamc's transmutation network at ``source`` for the duration.
+
+    yamc takes no per-call chain: ``Model.simulate_transmutation``,
+    ``Material.transmute``, ``Model.radionuclides`` and the D1S time correction
+    all assemble the network from the global decay, reactions and fission-yield
+    settings. ``source`` is a library keyword, or a chain root holding
+    ``decay/``, ``reactions/`` and ``fission_yields/`` (what
+    ``TransmutationChain.export_to_arrow`` writes). All three settings are
+    pointed at it and reset to yamc's default library afterwards.
+    """
+    import yamc as mc
+
+    for name in _NETWORK_SETTINGS:
+        setattr(mc, name, source)
+    try:
+        yield
+    finally:
+        for name in _NETWORK_SETTINGS:
+            setattr(mc, name, None)
+
+
+@contextlib.contextmanager
+def exported_chain(chain, nuclide: str):
+    """Write ``chain`` to a fresh chain root and yield its path, removed after.
+
+    The path is new on every call because yamc caches a parsed chain by its
+    path: reusing one would hand the next nuclide the previous one's chain.
+    """
+    root = tempfile.mkdtemp(prefix=f"yamc_chain_{nuclide}_", suffix=".chain.arrow")
+    try:
+        chain.export_to_arrow(root)
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def _d1s_chain_maps(chain_file: str, transmutation_data: str):

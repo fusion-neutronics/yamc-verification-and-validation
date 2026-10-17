@@ -142,9 +142,6 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
     codes answer the same question (fusion-neutronics/core#27); ``None`` keeps
     yamc's full-chain answer.
     """
-    import shutil
-    import tempfile
-
     import yamc as mc
 
     transmutation_data = discovery.transmutation_data_path(task.library)
@@ -172,24 +169,22 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
     )
 
     # Reduce the YAMC transmutation network to nuclides reachable from the seed
-    # (matches OpenMC's chain.reduce(...)); export to an arrow dir and point the
-    # global at it so radionuclides()/decay-photon channels pick it up.
+    # (matches OpenMC's chain.reduce(...)), write it to a chain root and point
+    # yamc's transmutation settings at it, so radionuclides(), the decay-photon
+    # transport and the time correction all read it.
     #
-    # The export path MUST be unique per nuclide: yamc caches the transmutation
+    # The chain root MUST be unique per nuclide: yamc caches the transmutation
     # chain by path, so reusing one path (as this once did) made every nuclide
     # after the first silently reuse the first nuclide's reduced chain.
     # radionuclides() then resolved this material's activation products against
-    # the wrong chain and came back empty, zeroing the decay-photon result. A
-    # fresh temp dir per nuclide sidesteps the cache; it is removed once the
-    # tally is time-corrected (the global chain is needed through that call).
+    # the wrong chain and came back empty, zeroing the decay-photon result.
+    # exported_chain gives each call a fresh root and removes it once the tally
+    # is time-corrected (the chain is needed through that call), and the
+    # settings go back to yamc's default library on the way out.
     yamc_chain = mc.TransmutationChain(transmutation_data)
     yamc_reduced = yamc_chain.reduce([nuclide], level=reduce_level)
-    reduced_dir = tempfile.mkdtemp(prefix="yamc_d1s_reduced_")
-    reduced_path = os.path.join(reduced_dir, "reduced.chain.arrow")
-    yamc_reduced.export_to_arrow(reduced_path)
-    mc.transmutation_data = reduced_path
-
-    try:
+    with discovery.exported_chain(yamc_reduced, nuclide) as chain_root, \
+            discovery.transmutation_network(chain_root):
         # Unstable activation products reachable from this model's materials.
         radionuclides = mc.Model(
             geometry=geometry, source=source, verbose=[],
@@ -256,8 +251,6 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
             'spectra_std': spectra_std,
             'elapsed': elapsed,
         }, model
-    finally:
-        shutil.rmtree(reduced_dir, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------
