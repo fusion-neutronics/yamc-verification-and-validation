@@ -58,15 +58,6 @@ def _mc_codes():
 _SPHERE = GeometryDims(sphere_radius=35.0)
 _BROOM = GeometryDims(cylinder_radius=1.0, cylinder_half_height=50.0)
 
-# Depletion-chain reduction depth, shared by every task that reduces the chain
-# (transmutation reaction-rate and flux-spectrum). Kept as one constant so the
-# level is 4 everywhere and cannot drift into a mix of levels across tasks.
-# `reduce_level` is part of each task's cache metadata, so changing this here
-# invalidates the affected cache and any re-run regenerates at the new level (no
-# mixed-level cache). The decay-photon tasks do not reduce: both codes read the
-# library's full chain there.
-_REDUCE_LEVEL = 4
-
 _TASKS: list[Task] = []
 
 
@@ -147,8 +138,7 @@ _reg(key="transmutation/material-reaction-rate/endf-b8.1",
      label="transmutation material-reaction-rate", item_kind="nuclide",
      codes=("openmc", "yamc-cpu"), caches_yamc=True,
      particles=1_000_000, source_energy=14.06e6, dims=GeometryDims(sphere_radius=5.0),
-     extras={"reduce_level": _REDUCE_LEVEL,
-             "timesteps": [3600.0, 3600.0, 3600.0, 15 * 86400.0, 15 * 86400.0],
+     extras={"timesteps": [3600.0, 3600.0, 3600.0, 15 * 86400.0, 15 * 86400.0],
              "source_rates": [1e18, 1e18, 1e18, 0.0, 0.0],
              "phases": ["irrad", "irrad", "irrad", "cool", "cool"]})
 _reg(key="transmutation/material-flux-spectrum/endf-b8.1",
@@ -156,8 +146,7 @@ _reg(key="transmutation/material-flux-spectrum/endf-b8.1",
      family="transmutation-flux-spectrum", geometry="material", library="endf-b8.1",
      label="transmutation material-flux-spectrum", item_kind="nuclide",
      codes=("openmc", "yamc"), caches_yamc=True,
-     extras={"reduce_level": _REDUCE_LEVEL,
-             "energy_groups": [1e-5, 0.625, 1e5, 2e7],
+     extras={"energy_groups": [1e-5, 0.625, 1e5, 2e7],
              "multigroup_flux": [1e12, 5e12, 1e14],
              "timesteps": [3600.0, 3600.0, 3600.0, 15 * 86400.0, 15 * 86400.0],
              "yamc_source_rates": [1.0, 1.0, 1.0, 0.0, 0.0],

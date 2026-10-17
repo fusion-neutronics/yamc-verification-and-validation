@@ -14,7 +14,6 @@ import contextlib
 import glob
 import os
 import re
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -251,21 +250,6 @@ def transmutation_network(source: str):
     finally:
         for name in _NETWORK_SETTINGS:
             setattr(mc, name, None)
-
-
-@contextlib.contextmanager
-def exported_chain(chain, nuclide: str):
-    """Write ``chain`` to a fresh chain root and yield its path, removed after.
-
-    The path is new on every call because yamc caches a parsed chain by its
-    path: reusing one would hand the next nuclide the previous one's chain.
-    """
-    root = tempfile.mkdtemp(prefix=f"yamc_chain_{nuclide}_", suffix=".chain.arrow")
-    try:
-        chain.export_to_arrow(root)
-        yield root
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
 
 
 def _d1s_chain_maps(chain_file: str, transmutation_data: str):

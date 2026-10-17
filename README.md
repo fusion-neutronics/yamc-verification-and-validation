@@ -114,8 +114,7 @@ from it (there are no notebooks):
   discovery, and generic spectrum-comparison plotting/metrics.
 - `progress.py`, `plan.py`, `dashboard.py`, `orchestrator.py` — the live
   dashboard: a progress side-channel, the up-front plan, rendering, and the runner.
-- `index_builder.py`, `reduced_chains.py` — build the `benchmarks-index.json` the
-  web page reads, and precompute OpenMC reduced-chain membership for it.
+- `index_builder.py`: builds the `benchmarks-index.json` the web page reads.
 
 Running one task in code is roughly:
 

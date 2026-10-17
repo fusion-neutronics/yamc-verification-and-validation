@@ -20,10 +20,11 @@ jobs:
 
       # numpy, pandas and plotly only, not requirements.txt. The tests reach
       # yamc_verify.plotting, which imports numpy and plotly, and the
-      # decay-photon family, which also imports pandas. requirements.txt also
-      # names openmc and openmc_data, which are a large download and a
-      # nuclear-data dependency that no test here needs: these tests drive the
-      # grading metric with arrays they build themselves, and stand in for yamc.
+      # decay-photon and transmutation families, which also import pandas.
+      # requirements.txt also names openmc and openmc_data, which are a large
+      # download and a nuclear-data dependency that no test here needs: these
+      # tests drive the grading metric with arrays they build themselves, and
+      # stand in for yamc and OpenMC.
       - name: Install what the tests need
         run: |
           python -m pip install --upgrade pip

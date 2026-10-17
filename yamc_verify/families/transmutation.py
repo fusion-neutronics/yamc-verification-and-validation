@@ -15,7 +15,10 @@ comparison/plot/metrics code but not their physics:
   depletion with NO geometry/transport. OpenMC uses ``material.deplete(
   multigroup_flux=..., energy_group_structure=...)``; YAMC uses
   ``material.transmute(schedule=...)`` with a ``mc.sources.Histogram`` flux
-  shape. Only the OpenMC result is cached; YAMC runs live (uncached).
+  shape. Both caches are written (``openmc`` and ``yamc``).
+
+Both codes solve every task on the library's full depletion chain; neither
+reduces it.
 
 The two ``run_*_transmutation`` runners are intentionally NOT unified. Only the
 Pulse/Cooldown schedule builder, the step-comparison metrics, the density
@@ -74,10 +77,9 @@ def run_openmc_reaction_rate(nuclide: str, task: Task, chain_file: str) -> dict:
     Builds a sphere model with a 14.06 MeV point source, wraps it in a
     ``CoupledOperator`` (``normalization_mode='source-rate'`` so the prescribed
     ``source_rates`` are emission rates in n/s), and integrates the schedule with
-    a predictor integrator. The depletion chain is reduced to the same level as
-    YAMC so only reachable products carry cross-section data.
+    a predictor integrator on the library's full depletion chain, as yamc does.
 
-    Returns dict with reduce_s, deplete_s, time_s and a ``steps`` list of
+    Returns dict with deplete_s, time_s and a ``steps`` list of
     ``{nuclide: atom_density}`` dicts (one per timestep, skipping the initial
     state) to match the comparison helpers.
     """
@@ -89,7 +91,6 @@ def run_openmc_reaction_rate(nuclide: str, task: Task, chain_file: str) -> dict:
 
     timesteps = task.extras["timesteps"]
     source_rates = task.extras["source_rates"]
-    reduce_level = task.extras["reduce_level"]
     sphere_radius = task.dims.sphere_radius
 
     openmc.reset_auto_ids()
@@ -123,25 +124,17 @@ def run_openmc_reaction_rate(nuclide: str, task: Task, chain_file: str) -> dict:
     settings.verbosity = 1
     model = openmc.model.Model(geometry, openmc.Materials([material]), settings)
 
-    # Reduce the depletion chain to this nuclide's neighborhood (timed for parity).
-    t0 = time.perf_counter()
-    chain = openmc.deplete.Chain.from_xml(chain_file)
-    reduced = chain.reduce([nuclide], reduce_level)
-    reduce_s = time.perf_counter() - t0
-
     # Run inside a scratch directory so the statepoint / results files written by
     # the integrator do not litter the notebook folder.
     work = tempfile.mkdtemp(prefix="openmc_coupled_")
     results_h5 = os.path.join(work, "depletion_results.h5")
-    reduced_xml = os.path.join(work, "reduced_chain.xml")
-    reduced.export_to_xml(reduced_xml)
 
     cwd = os.getcwd()
     t1 = time.perf_counter()
     try:
         os.chdir(work)
         operator = openmc.deplete.CoupledOperator(
-            model, chain_file=reduced_xml, normalization_mode='source-rate',
+            model, chain_file=chain_file, normalization_mode='source-rate',
         )
         integrator = openmc.deplete.PredictorIntegrator(
             operator,
@@ -162,28 +155,25 @@ def run_openmc_reaction_rate(nuclide: str, task: Task, chain_file: str) -> dict:
         steps.append(mat.get_nuclide_atom_densities())
 
     return {
-        'reduce_s': reduce_s,
         'deplete_s': deplete_s,
-        'time_s': reduce_s + deplete_s,
+        'time_s': deplete_s,
         'steps': steps,
     }
 
 
-def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain):
+def run_yamc_reaction_rate(nuclide: str, task: Task):
     """Run YAMC transport-coupled depletion for a single seed nuclide.
 
     Builds the same sphere geometry with a 14.06 MeV point source, then calls
     ``Model.simulate_transmutation(method="coupled", ...)``, which re-runs
     transport at every irradiation step and feeds the flux-weighted reaction
     rates into the burnup ODE. Cooling steps (rate 0) become ``Cooldown`` entries
-    that decay only. The network is the library's full chain, so YAMC solves
-    the full decay closure and does not truncate decay-fed nuclides the way
-    OpenMC's ``chain.reduce(...)`` network prune does at a low level. Which
-    products carry cross sections into transport is yamc's own screening
+    that decay only. The network is the library's full chain, as OpenMC's is.
+    Which products carry cross sections into transport is yamc's own screening
     (``product_threshold``, default 1e-12): a product is loaded once it reaches
     that atom fraction somewhere in the schedule.
 
-    Returns dict with reduce_s, deplete_s, time_s and a ``steps`` list of
+    Returns dict with deplete_s, time_s and a ``steps`` list of
     ``{nuclide: atom_density}`` dicts (one per timestep, skipping the initial
     state) to match the comparison helpers.
     """
@@ -191,7 +181,6 @@ def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain):
 
     timesteps = task.extras["timesteps"]
     source_rates = task.extras["source_rates"]
-    reduce_level = task.extras["reduce_level"]
     sphere_radius = task.dims.sphere_radius
 
     material = mc.Material(
@@ -222,12 +211,6 @@ def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain):
     # Irradiation pulses (rate in n/s) and cooling steps, matching OpenMC.
     schedule = build_pulse_schedule(timesteps, source_rates, source, rate_scale=1.0)
 
-    # The solve does not use a reduced chain; the reduction is timed only so
-    # the breakdown has a counterpart to OpenMC's.
-    t0 = time.perf_counter()
-    _ = yamc_chain.reduce([nuclide], level=reduce_level)
-    reduce_s = time.perf_counter() - t0
-
     t1 = time.perf_counter()
     with discovery.transmutation_network(task.library):
         results = model.simulate_transmutation(
@@ -245,9 +228,8 @@ def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain):
         steps.append(dict(d) if d else {})
 
     return {
-        'reduce_s': reduce_s,
         'deplete_s': deplete_s,
-        'time_s': reduce_s + deplete_s,
+        'time_s': deplete_s,
         'steps': steps,
     }, model
 
@@ -255,15 +237,13 @@ def run_yamc_reaction_rate(nuclide: str, task: Task, yamc_chain):
 # --------------------------------------------------------------------------
 # Flux-spectrum runners (flux-driven material depletion, no transport)
 # --------------------------------------------------------------------------
-def run_openmc_flux_spectrum(nuclide: str, task: Task, reduced_chain, reduce_s: float) -> dict:
+def run_openmc_flux_spectrum(nuclide: str, task: Task, chain_file: str) -> dict:
     """Run OpenMC ``material.deplete()`` for a single nuclide.
 
-    ``reduced_chain`` is the OpenMC ``Chain`` object reduced to the same
-    level as the YAMC chain so the comparison is symmetric. The matching
-    ``reduce_s`` cost (measured by the caller) is returned for parity with the
-    YAMC timing breakdown.
+    Depletes on the library's full chain (``chain_file``, used whole, as yamc
+    uses its full chain). OpenMC parses the file once per process and reuses it.
 
-    Returns dict with reduce_s, deplete_s, time_s and steps.
+    Returns dict with deplete_s, time_s and steps.
     """
     import os
 
@@ -290,7 +270,7 @@ def run_openmc_flux_spectrum(nuclide: str, task: Task, reduced_chain, reduce_s: 
         timesteps=timesteps,
         source_rates=openmc_source_rates,
         timestep_units='s',
-        chain_file=reduced_chain,
+        chain_file=chain_file,
     )
     deplete_s = time.perf_counter() - t0
 
@@ -300,25 +280,23 @@ def run_openmc_flux_spectrum(nuclide: str, task: Task, reduced_chain, reduce_s: 
         steps.append(mat.get_nuclide_atom_densities())
 
     return {
-        'reduce_s': reduce_s,
         'deplete_s': deplete_s,
-        'time_s': reduce_s + deplete_s,
+        'time_s': deplete_s,
         'steps': steps,
     }
 
 
-def run_yamc_flux_spectrum(nuclide: str, task: Task, yamc_chain):
+def run_yamc_flux_spectrum(nuclide: str, task: Task):
     """Run YAMC ``material.transmute()`` for a single nuclide.
 
-    Reduces the YAMC transmutation chain to the same level as OpenMC so only
-    the reachable products need cross-section data, and solves on that reduced
-    network (written to a chain root that the transmutation settings point at).
-    ``reduce_s`` includes writing it out. The 3-group flux shape is
-    carried as a Histogram source; the Pulse rate is the total flux magnitude
-    [n/cm^2/s] (sum of the multigroup flux), matching the OpenMC source_rates.
-    Cooling steps (rate 0) become Cooldown entries.
+    Solves on the library's full chain, as OpenMC does: the transmutation
+    settings point at the library keyword for the solve. Which products carry
+    cross sections is yamc's ``product_threshold`` screening (default 1e-12).
+    The 3-group flux shape is carried as a Histogram source; the Pulse rate is
+    the total flux magnitude [n/cm^2/s] (sum of the multigroup flux), matching
+    the OpenMC source_rates. Cooling steps (rate 0) become Cooldown entries.
 
-    Returns dict with reduce_s, deplete_s, time_s and steps.
+    Returns dict with deplete_s, time_s and steps.
     """
     import yamc as mc
 
@@ -326,7 +304,6 @@ def run_yamc_flux_spectrum(nuclide: str, task: Task, yamc_chain):
     multigroup_flux = task.extras["multigroup_flux"]
     timesteps = task.extras["timesteps"]
     yamc_source_rates = task.extras["yamc_source_rates"]
-    reduce_level = task.extras["reduce_level"]
 
     material = mc.Material(
         composition={nuclide: 1.0},
@@ -345,23 +322,17 @@ def run_yamc_flux_spectrum(nuclide: str, task: Task, yamc_chain):
     flux_magnitude = sum(multigroup_flux)
     schedule = build_pulse_schedule(timesteps, yamc_source_rates, spectrum, rate_scale=flux_magnitude)
 
-    # Reduce the pre-loaded YAMC chain to this nuclide's neighborhood.
-    t0 = time.perf_counter()
-    yamc_reduced = yamc_chain.reduce([nuclide], level=reduce_level)
-    with discovery.exported_chain(yamc_reduced, nuclide) as chain_root:
-        reduce_s = time.perf_counter() - t0
-        t1 = time.perf_counter()
-        with discovery.transmutation_network(chain_root):
-            results = material.transmute(schedule=schedule)
-        deplete_s = time.perf_counter() - t1
+    t1 = time.perf_counter()
+    with discovery.transmutation_network(task.library):
+        results = material.transmute(schedule=schedule)
+    deplete_s = time.perf_counter() - t1
 
     # The composition at the end of each schedule step (no initial state).
     steps = [dict(mat.nuclides) for mat in results.step_materials(material.id or 0)]
 
     return {
-        'reduce_s': reduce_s,
         'deplete_s': deplete_s,
-        'time_s': reduce_s + deplete_s,
+        'time_s': deplete_s,
         'steps': steps,
     }
 
@@ -591,7 +562,12 @@ def discover(task: Task, run_openmc: bool):
 
 
 def _metas(task: Task, chain_file: str):
-    """Reproduce the notebook's cache-meta dicts exactly (byte-match on disk)."""
+    """Reproduce the notebook's cache-meta dicts exactly (byte-match on disk).
+
+    ``"chain": "full"`` records that both codes solved on the library's full
+    chain. Results cached when the chain was reduced carry ``reduce_level``
+    instead, so they do not match and re-run.
+    """
     if task.family == REACTION_RATE:
         from cache_utils import yamc_fingerprint
 
@@ -604,7 +580,7 @@ def _metas(task: Task, chain_file: str):
             "material_density": 1.0,
             "timesteps": list(task.extras["timesteps"]),
             "source_rates": list(task.extras["source_rates"]),
-            "reduce_level": task.extras["reduce_level"],
+            "chain": "full",
         }
         openmc_meta = {**common, "total_particles": task.particles}
         yamc_meta = {**common, "total_particles": task.particles, **yamc_fingerprint()}
@@ -619,7 +595,7 @@ def _metas(task: Task, chain_file: str):
         "multigroup_flux": list(task.extras["multigroup_flux"]),
         "timesteps": list(task.extras["timesteps"]),
         "openmc_source_rates": list(task.extras["openmc_source_rates"]),
-        "reduce_level": task.extras["reduce_level"],
+        "chain": "full",
     }
     yamc_meta = {
         "library": task.library,
@@ -627,7 +603,7 @@ def _metas(task: Task, chain_file: str):
         "multigroup_flux": list(task.extras["multigroup_flux"]),
         "timesteps": list(task.extras["timesteps"]),
         "yamc_source_rates": list(task.extras["yamc_source_rates"]),
-        "reduce_level": task.extras["reduce_level"],
+        "chain": "full",
         **yamc_fingerprint(),
     }
     return openmc_meta, yamc_meta
@@ -637,14 +613,12 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     """Run every backend for every discovered nuclide. Returns (all_results, first_yamc_model).
 
     Dispatches on ``task.family``: the transport-coupled reaction-rate flow or
-    the flux-driven flux-spectrum flow (OpenMC chain reduced inline in the
-    loop). Both backends are cached in both flows.
+    the flux-driven flux-spectrum flow, both on the library's full chain. Both
+    backends are cached in both flows.
 
     ``cache_dir`` is resolved relative to the current working directory, which
     when run under nbconvert is the notebook's own directory.
     """
-    import yamc as mc
-
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
@@ -652,14 +626,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     phases = task.extras["phases"]
 
     chain_file = discovery.resolve_openmc_chain(task.library)
-    transmutation_data = discovery.transmutation_data_path(task.library)
     openmc_meta, yamc_meta = _metas(task, chain_file)
-
-    # Load the YAMC chain once; reduce(...) returns a fresh Chain per call.
-    t0 = time.perf_counter()
-    yamc_chain = mc.TransmutationChain(transmutation_data)
-    yamc_chain_load_s = time.perf_counter() - t0
-    print(f"YAMC chain load: {yamc_chain_load_s:.3f}s ({len(yamc_chain)} nuclides)")
 
     items = discover(task, b.run_openmc)
     if task.family == FLUX_SPECTRUM:
@@ -667,17 +634,6 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     else:
         names = list(items)
     print(f"Running {len(names)} nuclides: {names}")
-
-    # OpenMC chain load timing (for the display header), when OpenMC runs.
-    openmc_chain = None
-    openmc_chain_load_s = 0.0
-    if b.run_openmc and task.family == FLUX_SPECTRUM:
-        import openmc.deplete
-
-        t0 = time.perf_counter()
-        openmc_chain = openmc.deplete.Chain.from_xml(chain_file)
-        openmc_chain_load_s = time.perf_counter() - t0
-        print(f"OpenMC chain load: {openmc_chain_load_s:.3f}s ({len(openmc_chain.nuclides)} nuclides)")
 
     all_results = {}
     first_yamc_model = None
@@ -697,7 +653,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                 captured = {}
 
                 def _run(n=nuclide, cap=captured):
-                    res, model = run_yamc_reaction_rate(n, task, yamc_chain)
+                    res, model = run_yamc_reaction_rate(n, task)
                     cap["model"] = model
                     return res
 
@@ -711,18 +667,13 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                     print(f"  YAMC Error ({nuclide}): {e}")
             _finish_nuclide(per, all_results, nuclide, timesteps, phases)
     else:  # FLUX_SPECTRUM
-        reduce_level = task.extras["reduce_level"]
-        for nuclide, neutron_path in items:
+        for nuclide, _neutron_path in items:
             per = {}
             if b.run_openmc:
                 try:
-                    t0 = time.perf_counter()
-                    reduced_chain = openmc_chain.reduce([nuclide], reduce_level)
-                    omc_reduce_s = time.perf_counter() - t0
                     per["openmc"] = run_step(
                         cache_dir, task.library, "openmc", nuclide,
-                        lambda n=nuclide, rc=reduced_chain, rs=omc_reduce_s:
-                            run_openmc_flux_spectrum(n, task, rc, rs),
+                        lambda n=nuclide: run_openmc_flux_spectrum(n, task, chain_file),
                         meta=openmc_meta, cache=True)
                 except Exception as e:  # noqa: BLE001
                     print(f"  OpenMC Error ({nuclide}): {e}")
@@ -730,7 +681,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                 try:
                     per["yamc"] = run_step(
                         cache_dir, task.library, "yamc", nuclide,
-                        lambda n=nuclide: run_yamc_flux_spectrum(n, task, yamc_chain),
+                        lambda n=nuclide: run_yamc_flux_spectrum(n, task),
                         meta=yamc_meta, cache=task.caches_yamc)
                 except Exception as e:  # noqa: BLE001
                     print(f"  YAMC Error ({nuclide}): {e}")
@@ -785,7 +736,7 @@ def display_results(task: Task, all_results: dict):
         # Header
         display(Markdown(f"## {nuclide}"))
 
-        # Performance comparison (deplete only - chain reduce is sub-millisecond)
+        # Performance comparison (depletion time)
         perf_parts = []
         if or_ is not None:
             perf_parts.append(f"OpenMC: {or_['deplete_s']:.3f}s")
