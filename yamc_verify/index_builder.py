@@ -41,7 +41,6 @@ from cache_utils import _decode, yamc_fingerprint
 from . import tasks as _tasks
 from .discovery import element_from_nuclide
 from .plotting import calculate_spectral_agreement, quality_from_chi2
-from .reduced_chains import load as load_reduced_chains
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -205,33 +204,13 @@ MAX_EXPECTED_EXCLUDED_FLUX_PCT = 5.0
 _SPECTRUM_EDGE_KEY = {"flux": "energy_bins", "neutron": "n_energy_bins", "photon": "p_energy_bins"}
 
 
-def _transmutation_extra_nuclides(ymc, reduced_set):
-    """Nuclides YAMC produces (above threshold) that lie outside OpenMC's reduced chain.
-
-    These are the nuclides OpenMC cannot produce by construction at this
-    ``reduce_level`` (chain membership), so they are an expected extra rather
-    than a disagreement. Returns a sorted name list (empty if no sidecar).
-    """
-    if not reduced_set:
-        return []
-    from .families.transmutation import DENSITY_THRESHOLD
-
-    seen = set()
-    for step in ymc.get("steps", []) or []:
-        for name, dens in step.items():
-            if abs(dens) >= DENSITY_THRESHOLD and name not in reduced_set:
-                seen.add(name)
-    return sorted(seen)
-
-
-def _compare(task, omc, ymc, reduced_set=None, element=None):
+def _compare(task, omc, ymc, element=None):
     """Agreement metrics for one paired (benchmark, backend), or None.
 
     Residual grading (#59): every comparison gets one of the four grades, computed
     on the residual after the family's declared, physics-derived expected difference
     is removed. The expected difference, when present, is recorded in an
-    ``expected_difference`` annotation (never a grade band). ``reduced_set`` is
-    OpenMC's reduced-chain nuclide set for a transmutation seed.
+    ``expected_difference`` annotation (never a grade band).
     """
     if task.family.startswith("transmutation"):
         from .families.transmutation import compare_transmutation_steps
@@ -242,7 +221,7 @@ def _compare(task, omc, ymc, reduced_set=None, element=None):
             )
         except Exception:
             return None
-        out = {
+        return {
             "kind": "transmutation",
             "quality": cmp["quality"],
             "weighted_avg_rel_diff_pct": cmp["rms_rel_diff_pct"],
@@ -250,16 +229,6 @@ def _compare(task, omc, ymc, reduced_set=None, element=None):
             "products_compared": cmp["n_total"],
             "floats_compared": len(cmp["detail_rows"]),
         }
-        extra = _transmutation_extra_nuclides(ymc, reduced_set)
-        if extra:
-            # YAMC produces nuclides outside OpenMC's reduced chain by construction;
-            # transmutation already grades on the in-chain products, so this is a
-            # pure annotation.
-            out["expected_difference"] = {
-                "reason": "reduced-chain-out-of-chain-nuclides",
-                "nuclides": extra,
-            }
-        return out
 
     spectra = _compare_spectra(omc, ymc, task=task, element=element)
     n_scalars, worst_scalar_pct, worst_scalar = _scalar_rel_diffs(omc, ymc)
@@ -363,7 +332,6 @@ def build_index(tasks_list=None, worst_n=15):
         indexed_lib_dirs.add(lib_dir)
         if not lib_dir.is_dir():
             continue
-        reduced_chains = load_reduced_chains(task) if task.family.startswith("transmutation") else None
         code_files = {}
         for code_dir in sorted(p for p in lib_dir.iterdir() if p.is_dir()):
             files = {p.stem: p for p in code_dir.glob("*.json")}
@@ -404,8 +372,7 @@ def build_index(tasks_list=None, worst_n=15):
                         continue
                     code = group[base]
                     y_meta, y_res = loaded[code]
-                    reduced_set = reduced_chains.get(key) if reduced_chains else None
-                    cmp = _compare(task, omc_res, y_res, reduced_set=reduced_set, element=element)
+                    cmp = _compare(task, omc_res, y_res, element=element)
                     if cmp is not None:
                         comparisons.append({
                             "code": code,

@@ -1,7 +1,7 @@
 """Physics-derived expected-difference signatures for residual grading (#59).
 
 Each helper turns a known, code-independent physics fact (a characteristic
-fluorescence line energy, a daughter-gamma line, a reduced-chain membership) into
+fluorescence line energy, a daughter-gamma line) into
 a per-bin ``{bin_index -> "over" | "under"}`` spec that
 ``plotting.calculate_spectral_agreement`` uses to remove ONLY that expected
 directional difference from the residual grade. The signatures never look at the

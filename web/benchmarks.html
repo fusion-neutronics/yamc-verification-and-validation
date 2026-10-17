@@ -269,24 +269,13 @@
          methodological choice, not from either code being wrong. Read these before
          treating a disagreement as an error.</p>
 
-      <h4>Depletion chain reduction (transmutation benchmarks)</h4>
-      <p>OpenMC runs both transmutation benchmarks on a depletion chain reduced to
-         four steps from the seed. Its <code>Chain.reduce</code> prunes the
-         <em>whole</em> network (transport, decay, and the Bateman matrix together), so
-         it drops decay-fed nuclides beyond that reach entirely. On the reaction-rate
-         benchmark YAMC solves the burnup (Bateman) equations on the <em>full</em> decay
-         network instead. Its <code>product_threshold</code> (default 10<sup>-12</sup>)
-         decides only which products have their cross sections loaded and their own
-         neutron reactions solved: a product below it is still produced, decays and is
-         reported. On the flux-spectrum benchmark YAMC reduces its chain the same way
-         as OpenMC, to four steps from the seed.</p>
-      <p>The consequence is analytic, not a coincidence: any nuclide that appears in
-         YAMC's reaction-rate result but lies <em>outside</em> OpenMC's reduced chain is
-         one OpenMC cannot produce by construction. Where the codes disagree on such a
-         low-density, decay-fed nuclide, <strong>YAMC is the more complete result and
-         OpenMC has truncated a real decay pathway</strong>. It is not YAMC being
-         wrong. The dominant, physically significant nuclides agree closely; the
-         disagreements sit orders of magnitude below them.</p>
+      <h4>Depletion chain (transmutation benchmarks)</h4>
+      <p>Both codes solve the burnup (Bateman) equations on the library's full
+         depletion chain; neither reduces it. They differ only in which products have
+         their own neutron reactions solved: OpenMC solves every product's, YAMC those
+         that reach its <code>product_threshold</code> (default 10<sup>-12</sup>) at
+         some step. A product below it is still produced, decays and is reported; only
+         its own reactions are left out.</p>
 
       <h4>Shutdown dose rate / decay photons (D1S benchmarks)</h4>
       <p>For decay-gamma and shutdown-dose-rate benchmarks, YAMC's D1S (Direct-1-Step)
@@ -501,7 +490,6 @@
     var pct = e.excluded_flux_pct != null ? e.excluded_flux_pct
             : (e.other_only_flux_pct != null ? e.other_only_flux_pct : null);
     if (pct != null) s += " (" + pct.toFixed(2) + "% of flux)";
-    if (e.nuclides && e.nuclides.length) s += " (+" + e.nuclides.length + " out-of-chain nuclides)";
     if (e.needs_review) s += " -- review: exclusion implausibly large, showing full grade";
     return s;
   }
@@ -1633,18 +1621,6 @@
           badges.appendChild(badge);
         });
         box.appendChild(badges);
-        // transmutation: nuclides OpenMC's reduced chain cannot produce (chain membership)
-        var extra = [];
-        rec.comparisons.forEach(function (c) {
-          (((c.expected_difference || {}).nuclides) || []).forEach(function (n) {
-            if (extra.indexOf(n) < 0) extra.push(n);
-          });
-        });
-        if (extra.length) {
-          box.appendChild(el("p", "note",
-            "Expected extra nuclides YAMC produces that lie outside OpenMC's reduced chain (reduce_level " +
-            "boundary, so OpenMC cannot produce them): " + extra.sort(natCompare).join(", ")));
-        }
       }
 
       /* runnable reproducer script */
