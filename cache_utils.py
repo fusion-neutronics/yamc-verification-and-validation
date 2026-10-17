@@ -14,7 +14,8 @@ cache file overwritten.
 
 The module is imported by the notebooks under ``tasks/`` to avoid re-running
 simulations every notebook session. OpenMC reference results are keyed by run
-parameters only (OpenMC is fixed); YAMC results additionally fold
+parameters, and those of the photon-bearing families also by the OpenMC build
+(:func:`openmc_fingerprint`). YAMC results additionally fold
 :func:`yamc_fingerprint` into their metadata, so the cache auto-invalidates and
 the simulation re-runs whenever the installed yamc version or compiled core
 (``_core*.so``) changes. Set ``YAMC_VERIFY_ACCEPT_OLD_CACHE=1`` to accept
@@ -307,6 +308,35 @@ def _yamc_core_hash() -> Optional[str]:
         return h.hexdigest()[:12]
     except Exception:
         return None
+
+
+@functools.lru_cache(maxsize=1)
+def openmc_fingerprint() -> dict:
+    """Identity of the OpenMC that runs the references, for cache invalidation.
+
+    Returns ``{"openmc_version": ..., "openmc_commit": ...}`` as ``openmc
+    --version`` prints them for the executable on ``PATH``, the one
+    ``openmc.Model.run`` starts. The photon-bearing families fold it into their
+    OpenMC cache metadata: their references changed with the OpenMC build
+    (openmc#4036 corrected Compton shell selection and Doppler broadening), so a
+    reference made by another build re-runs.
+    """
+    import re
+    import shutil
+    import subprocess
+
+    exe = shutil.which("openmc")
+    if exe is None:
+        raise FileNotFoundError(
+            "No openmc executable on PATH: the OpenMC references need one, and their "
+            "cache records its version and commit."
+        )
+    out = subprocess.run([exe, "--version"], capture_output=True, text=True, check=True).stdout
+    version = re.search(r"OpenMC version (\S+)", out)
+    commit = re.search(r"Commit hash: (\S+)", out)
+    if version is None or commit is None:
+        raise RuntimeError(f"Could not read the version and commit from `{exe} --version`:\n{out}")
+    return {"openmc_version": version.group(1), "openmc_commit": commit.group(1)}
 
 
 def _accept_old_cache() -> bool:

@@ -17,11 +17,11 @@ from pathlib import Path
 
 import yamc
 
-from cache_utils import _cache_path, yamc_fingerprint
+from cache_utils import _cache_path, openmc_fingerprint, yamc_fingerprint
 
 from . import discovery
 from .backends import Backends
-from .tasks import Task
+from .tasks import OPENMC_BUILD_KEYED_FAMILIES, Task
 
 
 def yamc_build_age() -> float | None:
@@ -102,15 +102,18 @@ def real_codes(base_codes: list[str], task: Task) -> list[str]:
     return [f"{base}-{t}" for base in base_codes for t in treatments]
 
 
-def _code_meta(code: str, library: str, fingerprint: dict) -> dict:
+def _code_meta(code: str, task: Task, fingerprint: dict) -> dict:
     """Minimal cache-validity meta for the up-front estimate.
 
-    OpenMC is fixed, so a matching library is enough; YAMC additionally must
-    match the current build fingerprint (a new build invalidates its cache).
+    A matching library is enough for most OpenMC references. Those of the
+    photon-bearing families must also match the OpenMC build, and YAMC must
+    match the current yamc build fingerprint (a new build invalidates its cache).
     """
-    meta = {"library": library}
+    meta = {"library": task.library}
     if code.startswith("yamc"):
         meta = {**meta, **fingerprint}
+    elif task.family in OPENMC_BUILD_KEYED_FAMILIES:
+        meta = {**meta, **openmc_fingerprint()}
     return meta
 
 
@@ -130,7 +133,7 @@ def build_state(tasks: list[Task], backends: Backends) -> dict:
             items = []
         code_entries = {}
         for code in codes:
-            meta = _code_meta(code, task.library, fingerprint)
+            meta = _code_meta(code, task, fingerprint)
             cached = 0
             seed_times = []
             for key in items:
