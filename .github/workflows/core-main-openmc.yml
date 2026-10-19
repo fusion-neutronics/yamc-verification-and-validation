@@ -60,6 +60,13 @@ jobs:
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -r verification/requirements.txt pytest pyarrow maturin
 
+      - name: Download OpenMC ENDF/B-VIII.1 depletion chain
+        run: |
+          chain_dir=$(.venv/bin/python -c 'from pathlib import Path; import openmc_data; print(Path(openmc_data.__file__).parent / "depletion")')
+          .venv/bin/download_chain --library endf --release b8.1 --branching_ratios None \
+            --destination "$chain_dir" --filename chain_endf_b8.1.xml
+          test -s "$chain_dir/chain_endf_b8.1.xml"
+
       - name: Build the selected core, not the published wheel
         working-directory: core/packages/yamc-core
         run: |
