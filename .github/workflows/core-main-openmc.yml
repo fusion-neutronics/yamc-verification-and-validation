@@ -1,0 +1,107 @@
+name: Core main against OpenMC
+
+on:
+  schedule:
+    - cron: "43 3 * * *"
+  workflow_dispatch:
+    inputs:
+      core_ref:
+        description: Core branch, tag, or commit to validate
+        type: string
+        default: main
+        required: true
+  pull_request:
+    paths:
+      - "yamc_verify/core_references.py"
+      - "yamc_verify/core_validation.py"
+      - "tests/test_core_validation.py"
+      - "requirements.txt"
+      - ".github/workflows/core-main-openmc.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-openmc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      OMP_NUM_THREADS: "2"
+      YAMC_CORE_ROOT: ${{ github.workspace }}/core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: verification
+
+      - uses: actions/checkout@v4
+        with:
+          repository: fusion-neutronics/core
+          ref: ${{ inputs.core_ref || 'main' }}
+          path: core
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+          shared-key: core-openmc
+
+      - name: Install validation tools and OpenMC
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r verification/requirements.txt pytest pyarrow maturin
+
+      - name: Download OpenMC ENDF/B-VIII.1 depletion chain
+        run: |
+          chain_dir=$(.venv/bin/python -c 'from pathlib import Path; import openmc_data; print(Path(openmc_data.__file__).parent / "depletion")')
+          .venv/bin/download_chain --library endf --release b8.1 --branching_ratios None \
+            --destination "$chain_dir" --filename chain_endf_b8.1.xml
+          test -s "$chain_dir/chain_endf_b8.1.xml"
+
+      - name: Build the selected core, not the published wheel
+        working-directory: core/packages/yamc-core
+        run: |
+          VIRTUAL_ENV="$GITHUB_WORKSPACE/.venv" \
+            "$GITHUB_WORKSPACE/.venv/bin/maturin" develop --release
+
+      - name: Resolve the Arrow fixture release
+        id: fixtures
+        run: |
+          release=$(.venv/bin/python core/scripts/fetch_test_fixtures.py --print-release)
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yamc
+            ~/.cache/yamc-verification/core-comparison
+          key: core-openmc-data-${{ runner.os }}-${{ steps.fixtures.outputs.release }}-${{ hashFiles('verification/yamc_verify/core_references.py', 'verification/requirements.txt') }}
+
+      - name: Fetch core's Arrow fixtures
+        run: .venv/bin/python core/scripts/fetch_test_fixtures.py
+
+      - name: Compare all four physics modes with OpenMC
+        working-directory: verification
+        env:
+          YAMC_REQUIRE_FIXTURES: "1"
+        run: |
+          export PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH"
+          python -m yamc_verify.core_validation --output-dir validation-results
+
+      - name: Retain results and provenance, including failed comparisons
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-openmc-${{ github.run_id }}
+          path: verification/validation-results
+          if-no-files-found: warn
+          retention-days: 30
