@@ -90,7 +90,7 @@ def test_yamc_reads_the_full_chain_through_the_whole_run(fake_yamc, key):
         "radionuclides", "simulate_transport", "time_correct_tally"]
     for call, settings in fake_yamc.reads:
         assert settings == (task.library,) * 3, call
-    # Back at yamc's default library afterwards, so nothing leaks into the next run.
+    # Unset again afterwards, so nothing leaks into the next run.
     assert tuple(getattr(fake_yamc, name) for name in SETTINGS) == (None,) * 3
     assert result["radionuclides"] == ["Mn56", "Mn54"]
 

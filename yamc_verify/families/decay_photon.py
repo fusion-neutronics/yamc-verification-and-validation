@@ -172,7 +172,7 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
     # OpenMC's chain_file is (run_openmc_d1s). radionuclides(), the decay-photon
     # transport and the time correction all read it, so every activation
     # product's daughters are followed to the end of their decay chains. The
-    # settings go back to yamc's default library on the way out.
+    # settings are unset again on the way out.
     with discovery.transmutation_network(task.library):
         # Unstable activation products reachable from this model's materials.
         radionuclides = mc.Model(
