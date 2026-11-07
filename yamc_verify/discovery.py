@@ -272,7 +272,9 @@ def transmutation_network(source: str):
     settings. ``source`` is a library keyword, or a chain root holding
     ``decay/``, ``reactions/`` and ``fission_yields/`` (what
     ``TransmutationChain.export_to_arrow`` writes). All three settings are
-    pointed at it and reset to yamc's default library afterwards.
+    pointed at it and unset afterwards. yamc has no default for them (since
+    yamc-core 0.17.0 a calculation that reads an unset one is refused), so a
+    run outside this context cannot read a chain nobody chose.
     """
     import yamc as mc
 

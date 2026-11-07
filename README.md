@@ -9,7 +9,7 @@ Monte Carlo code, OpenMC.
 pip install -r requirements.txt
 ```
 
-This installs yamc from PyPI as the `yamc-core` wheel, 0.16.0 or newer. To verify
+This installs yamc from PyPI as the `yamc-core` wheel, 0.16.1 or newer. To verify
 yamc changes that are not released yet, build the core into the same environment
 instead (see [Using the latest yamc](#using-the-latest-yamc)).
 
