@@ -6,15 +6,15 @@
 # so the terminal shows only the indented task > code > counts view.
 #
 # Usage (arguments are task keys; the old notebook paths still work too):
-#   ./run_models.sh                                  # all endf-b8.1 tasks
-#   YAMC_VERIFY_NUMBER_OF_SIMULATIONS=10 ./run_models.sh
+#   MC_BACKENDS=openmc-cpu ./run_models.sh                       # all endf-b8.1 tasks
+#   YAMC_VERIFY_NUMBER_OF_SIMULATIONS=10 MC_BACKENDS=openmc-cpu ./run_models.sh
 #   MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
-#   ./run_models.sh neutron/sphere/endf-b8.1         # specific task(s)
+#   MC_BACKENDS=openmc-cpu ./run_models.sh neutron/sphere/endf-b8.1   # specific task(s)
 #
 # Env vars (read by the orchestrator / run_task):
 #   YAMC_VERIFY_NUMBER_OF_SIMULATIONS  cap on nuclides/elements per task (default 3;
 #                                      0 = every isotope, -1 = every stable isotope)
-#   MC_BACKENDS                        comma list of openmc-cpu,yamc-cpu,yamc-gpu (default openmc-cpu)
+#   MC_BACKENDS                        comma list of openmc-cpu,yamc-cpu,yamc-gpu (required, no default)
 #   YAMC_VERIFY_NUCLIDES / YAMC_VERIFY_ELEMENTS  explicit item list (overrides the cap)
 #
 # Results are written to the on-disk cache and viewed in the benchmark database
@@ -24,7 +24,13 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 export YAMC_VERIFY_NUMBER_OF_SIMULATIONS="${YAMC_VERIFY_NUMBER_OF_SIMULATIONS:-3}"
-export MC_BACKENDS="${MC_BACKENDS:-openmc-cpu}"
+if [ -z "${MC_BACKENDS:-}" ]; then
+    echo "error: MC_BACKENDS is not set. Name the backends to run, e.g." >&2
+    echo "  MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh" >&2
+    echo "Valid backends: openmc-cpu, yamc-cpu, yamc-gpu" >&2
+    exit 2
+fi
+export MC_BACKENDS
 
 # Prefer the repo virtualenv's python; fall back to whatever is on PATH.
 PYTHON=".venv/bin/python"

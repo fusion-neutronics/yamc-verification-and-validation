@@ -83,7 +83,7 @@ The full plan (every task, code, and cached/to-do split) is computed up front
 by inspecting the cache, and the counts + ETA update live as each item
 finishes. Environment variables control it:
 
-- `MC_BACKENDS` - comma-separated list of `openmc-cpu`, `yamc-cpu`, `yamc-gpu` (default: `openmc-cpu`).
+- `MC_BACKENDS` - comma-separated list of `openmc-cpu`, `yamc-cpu`, `yamc-gpu`. Required: there is no default, and the run stops with an error if it is unset.
 - `YAMC_VERIFY_NUCLIDES` - comma-separated list naming the exact isotope(s) to run
   on the nuclide-based models (neutron, secondary-photon, decay-photon, transmutation),
   e.g. `Fe56`. Overrides the count cap.
@@ -101,7 +101,7 @@ Examples:
 
 ```bash
 # OpenMC only, 3 nuclides/elements per model (builds the reference cache)
-./run_models.sh
+MC_BACKENDS=openmc-cpu ./run_models.sh
 
 # yamc + OpenMC, 3 each (this is what fills the comparison plots)
 MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
@@ -166,7 +166,7 @@ Running one task in code is roughly:
 ```python
 from yamc_verify import backends, get_task
 from yamc_verify.run_task import run_task
-run_task(get_task("neutron/sphere/endf-b8.1"), backends.resolve())
+run_task(get_task("neutron/sphere/endf-b8.1"), backends.resolve("openmc-cpu,yamc-cpu"))
 ```
 
 ## Adding a nuclear data library
