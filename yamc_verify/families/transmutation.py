@@ -569,8 +569,6 @@ def _metas(task: Task, chain_file: str):
     instead, so they do not match and re-run.
     """
     if task.family == REACTION_RATE:
-        from cache_utils import yamc_fingerprint
-
         common = {
             "library": task.library,
             "method": "coupled",
@@ -583,10 +581,9 @@ def _metas(task: Task, chain_file: str):
             "chain": "full",
         }
         openmc_meta = {**common, "total_particles": task.particles}
-        yamc_meta = {**common, "total_particles": task.particles, **yamc_fingerprint()}
+        yamc_meta = {**common, "total_particles": task.particles}
         return openmc_meta, yamc_meta
     # flux-spectrum: flux-driven material.transmute() (no transport).
-    from cache_utils import yamc_fingerprint
 
     openmc_meta = {
         "library": task.library,
@@ -604,7 +601,6 @@ def _metas(task: Task, chain_file: str):
         "timesteps": list(task.extras["timesteps"]),
         "yamc_source_rates": list(task.extras["yamc_source_rates"]),
         "chain": "full",
-        **yamc_fingerprint(),
     }
     return openmc_meta, yamc_meta
 
@@ -646,7 +642,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                     per["openmc"] = run_step(
                         cache_dir, task.library, "openmc", nuclide,
                         lambda n=nuclide: run_openmc_reaction_rate(n, task, chain_file),
-                        meta=openmc_meta, cache=True)
+                        settings=openmc_meta, cache=True)
                 except Exception as e:  # noqa: BLE001
                     print(f"  OpenMC Error ({nuclide}): {e}")
             if b.computes:
@@ -660,7 +656,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                 try:
                     per["yamc"] = run_step(
                         cache_dir, task.library, "yamc-cpu", nuclide, _run,
-                        meta=yamc_meta, cache=task.caches_yamc)
+                        settings=yamc_meta, cache=task.caches_yamc)
                     if first_yamc_model is None and "model" in captured:
                         first_yamc_model = captured["model"]
                 except Exception as e:  # noqa: BLE001
@@ -674,7 +670,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                     per["openmc"] = run_step(
                         cache_dir, task.library, "openmc", nuclide,
                         lambda n=nuclide: run_openmc_flux_spectrum(n, task, chain_file),
-                        meta=openmc_meta, cache=True)
+                        settings=openmc_meta, cache=True)
                 except Exception as e:  # noqa: BLE001
                     print(f"  OpenMC Error ({nuclide}): {e}")
             if b.computes:
@@ -682,7 +678,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                     per["yamc"] = run_step(
                         cache_dir, task.library, "yamc", nuclide,
                         lambda n=nuclide: run_yamc_flux_spectrum(n, task),
-                        meta=yamc_meta, cache=task.caches_yamc)
+                        settings=yamc_meta, cache=task.caches_yamc)
                 except Exception as e:  # noqa: BLE001
                     print(f"  YAMC Error ({nuclide}): {e}")
             _finish_nuclide(per, all_results, nuclide, timesteps, phases)

@@ -36,7 +36,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cache_utils import _decode, yamc_fingerprint
+from cache_utils import _decode, code_identity, iter_records
 
 from . import tasks as _tasks
 from .discovery import element_from_nuclide
@@ -82,14 +82,9 @@ def _jsonable(obj):
     return obj
 
 
-def _load(path: Path):
-    """Return (meta, results) for one cache file, or None if unreadable."""
-    try:
-        with path.open() as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data.get("_meta", {}), _decode(data.get("results") or {})
+def _latest(lib_dir: Path, code: str, key: str):
+    """``(path, record)`` of the newest readable record of one item, or ``None``."""
+    return next(iter_records(lib_dir.parent, lib_dir.name, code, key), None)
 
 
 def _spectrum_pairs(results):
@@ -318,9 +313,10 @@ def build_index(tasks_list=None, worst_n=15):
     """Walk the cache for every registered task and build the index dict."""
     tasks_list = tasks_list or _tasks.all_tasks()
     try:
-        fingerprint = yamc_fingerprint()
+        ident = code_identity("yamc")
+        installed = {"version": ident["version"], "build_id": ident["build_id"]}
     except Exception:
-        fingerprint = None  # yamc not installed (e.g. CI); the cache is enough
+        installed = None  # yamc not installed (e.g. CI); the records are enough
 
     records = []
     unreadable = []
@@ -332,22 +328,27 @@ def build_index(tasks_list=None, worst_n=15):
         indexed_lib_dirs.add(lib_dir)
         if not lib_dir.is_dir():
             continue
-        code_files = {}
+        # <library>/<code>/<item>/<build_id>.json; the newest record of each
+        # item is the one shown.
+        code_items = {}
         for code_dir in sorted(p for p in lib_dir.iterdir() if p.is_dir()):
-            files = {p.stem: p for p in code_dir.glob("*.json")}
-            if files:
-                code_files[code_dir.name] = files
-        all_keys = sorted(set().union(*map(set, code_files.values()), set()))
+            items = {d.name for d in code_dir.iterdir() if d.is_dir() and any(d.glob("*.json"))}
+            if items:
+                code_items[code_dir.name] = items
+        all_keys = sorted(set().union(*code_items.values(), set()))
         for key in all_keys:
             loaded = {}
-            for code, files in code_files.items():
-                if key not in files:
+            paths = {}
+            for code, items in code_items.items():
+                if key not in items:
                     continue
-                data = _load(files[key])
-                if data is None:
-                    unreadable.append(str(files[key].relative_to(_REPO_ROOT)))
-                else:
-                    loaded[code] = data
+                newest = _latest(lib_dir, code, key)
+                if newest is None:
+                    unreadable.append((lib_dir / code / key).relative_to(_REPO_ROOT).as_posix())
+                    continue
+                path, record = newest
+                loaded[code] = (record["code_identity"], _decode(record.get("results") or {}))
+                paths[code] = path
             if not loaded:
                 continue
             n_simulations += len(loaded)
@@ -371,14 +372,15 @@ def build_index(tasks_list=None, worst_n=15):
                     if base == "openmc":
                         continue
                     code = group[base]
-                    y_meta, y_res = loaded[code]
+                    y_ident, y_res = loaded[code]
                     cmp = _compare(task, omc_res, y_res, element=element)
                     if cmp is not None:
                         comparisons.append({
                             "code": code,
                             "treatment": treatment or None,
-                            "yamc_version": y_meta.get("yamc_version"),
-                            "yamc_core_sha": y_meta.get("yamc_core_sha"),
+                            "yamc_version": y_ident.get("version"),
+                            "yamc_build": y_ident.get("build_id"),
+                            "openmc_build": loaded[ref][0].get("build_id"),
                             **cmp,
                         })
             records.append({
@@ -392,7 +394,7 @@ def build_index(tasks_list=None, worst_n=15):
                 "element": element,
                 "codes": sorted(loaded),
                 "files": {
-                    c: code_files[c][key].relative_to(_REPO_ROOT).as_posix() for c in loaded
+                    c: paths[c].relative_to(_REPO_ROOT).as_posix() for c in loaded
                 },
                 "comparisons": comparisons,
             })
@@ -404,7 +406,7 @@ def build_index(tasks_list=None, worst_n=15):
         if not cache_root.is_dir():
             continue
         for lib_dir in sorted(p for p in cache_root.iterdir() if p.is_dir()):
-            if lib_dir not in indexed_lib_dirs and any(lib_dir.glob("*/*.json")):
+            if lib_dir not in indexed_lib_dirs and any(lib_dir.glob("*/*/*.json")):
                 unindexed.append(lib_dir.relative_to(_REPO_ROOT).as_posix())
 
     flat = [(r, c) for r in records for c in r["comparisons"]]
@@ -417,7 +419,7 @@ def build_index(tasks_list=None, worst_n=15):
     index = {
         "schema_version": 1,
         "generated_unix": int(time.time()),
-        "yamc": fingerprint,
+        "yamc": installed,
         "totals": {
             "simulations": n_simulations,
             "benchmarks": len(records),

@@ -1024,7 +1024,8 @@
           if (!r.ok) throw new Error("HTTP " + r.status + " for " + path);
           return r.json();
         })
-        .then(function (d) { return { meta: d._meta || {}, results: decodeNp(d.results || {}) }; });
+        /* `meta` is the run settings of the record (cache_utils.save_cached) */
+        .then(function (d) { return { meta: d.settings || {}, results: decodeNp(d.results || {}) }; });
       cacheStore[path].catch(function () { delete cacheStore[path]; });
     }
     return cacheStore[path];
@@ -1802,8 +1803,8 @@
     var when = idx.generated_unix ? new Date(idx.generated_unix * 1000).toUTCString() : null;
     var bits = [];
     if (when) bits.push("Index generated " + when);
-    if (idx.yamc && idx.yamc.yamc_version) {
-      bits.push("yamc " + idx.yamc.yamc_version + (idx.yamc.yamc_core_sha ? " (" + idx.yamc.yamc_core_sha + ")" : ""));
+    if (idx.yamc && idx.yamc.version) {
+      bits.push("yamc " + idx.yamc.build_id);
     }
     bits.push("schema v" + idx.schema_version);
     foot.textContent = bits.join(" · ");

@@ -187,23 +187,35 @@ run_task(get_task("neutron/sphere/endf-b8.1"), backends.resolve("openmc-cpu,yamc
 
 ## Results cache
 
-Simulation results are cached as JSON under
-`tasks/<model>/<...>/cache/<library>/<code>/<nuclide>.json` (via `cache_utils.py`),
-so re-running a task does not repeat simulations that are already cached. Two
-invalidation policies:
+Every simulation result is a self-describing JSON record (via `cache_utils.py`) at
+`tasks/<model>/<...>/cache/<library>/<code>/<item>/<build_id>.json`. A record
+holds the code that produced it (name, version, git commit, whether the build had
+uncommitted changes, backend), the run settings and their hash, when and where it
+ran and how long it took, and the results.
 
-- **OpenMC** results are keyed by the run parameters (library, particles,
-  batches, source energy), so they stay valid until a parameter changes. The
-  photon-bearing families (photon, secondary-photon, decay-photon) are also keyed
-  by the **OpenMC build** (`cache_utils.openmc_fingerprint()`, stored as
-  `openmc_version` and `openmc_commit` from `openmc --version`): their photon
-  references changed with openmc#4036, which corrected Compton shell selection
-  and Doppler broadening, so a reference made by another OpenMC build re-runs.
-- **YAMC** results are additionally keyed by the **yamc version and a content hash
-  of its compiled extension** (`cache_utils.yamc_fingerprint()`, stored as
-  `yamc_version` and `yamc_core_sha`). Installing another yamc release or
-  rebuilding the core auto-invalidates the cache and the affected simulations
-  re-run on the next run.
+A record is never overwritten by another build: a new yamc commit or a new OpenMC
+release writes a record next to the old one, so two builds can be compared.
+`<build_id>` is `<version>+g<commit>`, with `.dirty` and a hash of the compiled
+extension added for a build with uncommitted changes, and `<version>+so<hash>`
+for a yamc wheel that does not report its commit (yamc-core before the release
+that adds `yamc.__commit__`).
+
+Which record a run accepts:
+
+- **YAMC** needs a record from the installed build with matching settings, so a
+  new yamc release or a rebuild re-runs it.
+- **OpenMC** needs matching settings (library, particles, batches, source
+  energy), and any build will do. The photon-bearing families (photon,
+  secondary-photon, decay-photon) also need the installed OpenMC build while
+  OpenMC runs: their references changed with openmc#4036, which corrected
+  Compton shell selection and Doppler broadening. A yamc-only run never needs
+  OpenMC installed.
+- `YAMC_VERIFY_ACCEPT_OLD_CACHE=1` accepts the newest record with matching
+  settings from any build.
+
+The benchmark page and `python -m yamc_verify.audit` show the newest record of
+each item; the audit marks YAMC results from a build other than the installed
+one as stale.
 
 To force everything to re-run, delete the cache directories:
 

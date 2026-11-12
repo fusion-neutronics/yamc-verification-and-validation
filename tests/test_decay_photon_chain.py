@@ -16,6 +16,9 @@ from cache_utils import load_cached, save_cached
 from yamc_verify import tasks
 from yamc_verify.families import decay_photon
 
+# A stand-in build: these tests are about the settings, not the code identity.
+_ANY_BUILD = {"name": "test", "build_id": "test"}
+
 SETTINGS = ("transmutation_decay_data", "transmutation_reactions", "transmutation_fission_yields")
 D1S_TASKS = ("decay-photon/sphere/endf-b8.1", "decay-photon/broomstick/endf-b8.1")
 
@@ -103,15 +106,15 @@ def test_no_reduction_level_is_configured(key):
 def test_a_result_cached_without_the_chain_record_reruns(tmp_path, monkeypatch):
     """A yamc result cached before the chain was recorded may come from the
     level-4 reduced chain, so the cache must not hand it back."""
-    # Keep yamc out of the build fingerprint: this test is about the chain key.
+    # Accept a record from any build: this test is about the chain key.
     monkeypatch.setenv("YAMC_VERIFY_ACCEPT_OLD_CACHE", "1")
     task = tasks.get_task(D1S_TASKS[0])
     meta = decay_photon._yamc_meta(task)
     assert meta["yamc_chain"] == "full"
 
     before = {k: v for k, v in meta.items() if k != "yamc_chain"}
-    save_cached(tmp_path, task.library, "yamc-cpu", "Ac225", {"spectra": []}, meta=before)
-    assert load_cached(tmp_path, task.library, "yamc-cpu", "Ac225", expected_meta=meta) is None
+    save_cached(tmp_path, task.library, "yamc-cpu", "Ac225", {"spectra": []}, settings=before, identity=_ANY_BUILD)
+    assert load_cached(tmp_path, task.library, "yamc-cpu", "Ac225", settings=meta) is None
 
-    save_cached(tmp_path, task.library, "yamc-cpu", "Ac225", {"spectra": []}, meta=meta)
-    assert load_cached(tmp_path, task.library, "yamc-cpu", "Ac225", expected_meta=meta) is not None
+    save_cached(tmp_path, task.library, "yamc-cpu", "Ac225", {"spectra": []}, settings=meta, identity=_ANY_BUILD)
+    assert load_cached(tmp_path, task.library, "yamc-cpu", "Ac225", settings=meta) is not None

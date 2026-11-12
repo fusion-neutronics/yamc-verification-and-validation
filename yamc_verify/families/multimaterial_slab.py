@@ -265,13 +265,11 @@ def discover(task: Task, run_openmc: bool) -> list[str]:
 
 
 def _metas(task: Task):
-    from cache_utils import yamc_fingerprint
-
     openmc_meta = {
         "library": task.library, "particles": task.particles,
         "batches": task.batches, "source_energy": task.source_energy,
     }
-    yamc_meta = {**openmc_meta, **yamc_fingerprint()}
+    yamc_meta = dict(openmc_meta)
     return openmc_meta, yamc_meta
 
 
@@ -306,7 +304,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                 per["openmc"] = run_step(
                     cache_dir, task.library, "openmc", layer_name,
                     layer_fn("openmc", layer_name, lambda: run_slab_openmc(task)),
-                    meta=openmc_meta, cache=True)
+                    settings=openmc_meta, cache=True)
             except Exception as e:  # noqa: BLE001
                 print(f"  OpenMC Error ({layer_name}): {e}")
         for compute in b.computes:
@@ -315,7 +313,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                 per[code] = run_step(
                     cache_dir, task.library, code, layer_name,
                     layer_fn(code, layer_name, lambda c=compute: run_slab_yamc(task, compute=c)),
-                    meta=yamc_meta, cache=task.caches_yamc)
+                    settings=yamc_meta, cache=task.caches_yamc)
             except Exception as e:  # noqa: BLE001
                 print(f"  YAMC ({compute}) Error ({layer_name}): {e}")
         if per:

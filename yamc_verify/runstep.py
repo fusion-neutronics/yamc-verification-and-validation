@@ -22,7 +22,8 @@ def run_step(
     key: str,
     run_fn: Callable[[], Mapping],
     *,
-    meta: Optional[Mapping] = None,
+    settings: Optional[Mapping] = None,
+    build_keyed: Optional[bool] = None,
     cache: bool = True,
     verbose: bool = False,
 ) -> dict:
@@ -36,7 +37,8 @@ def run_step(
         from cache_utils import cached_or_run
 
         return cached_or_run(
-            cache_dir, library, code, key, run_fn, meta=meta, verbose=verbose
+            cache_dir, library, code, key, run_fn,
+            settings=settings, build_keyed=build_keyed, verbose=verbose,
         )
 
     progress.report_item_start(code, key)

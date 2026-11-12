@@ -3,21 +3,19 @@
 For every task the planner discovers the item list (same discovery the thin
 notebooks use, so no drift) and classifies each ``(item, code)`` as already
 cached or still to-do by inspecting the on-disk cache. Cached-item wall times
-recorded in the cache metadata (including stale entries from a previous build)
+recorded in the result records (including records from a previous build)
 seed the ETA estimate. The plan is an *estimate*: the live ``cached``/``computed``
 events emitted while a notebook runs are authoritative and correct it.
 """
 from __future__ import annotations
 
 import glob
-import json
 import os
 import time
-from pathlib import Path
 
 import yamc
 
-from cache_utils import _cache_path, openmc_fingerprint, yamc_fingerprint
+from cache_utils import code_identity, find_record, latest_record
 
 from . import discovery
 from .backends import Backends
@@ -70,19 +68,17 @@ def discover_items(task: Task, run_openmc: bool) -> list[str]:
     return []
 
 
-def _cache_info(cache_dir, library, code, key, meta):
-    """Return (cached_valid: bool, elapsed_seconds: float | None) for one entry."""
-    p = _cache_path(cache_dir, library, code, key)
-    if not Path(p).exists():
-        return False, None
-    try:
-        with open(p) as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return False, None
-    m = data.get("_meta", {})
-    elapsed = m.get("elapsed_seconds")
-    valid = all(m.get(k) == v for k, v in meta.items())
+def _cache_info(cache_dir, library, code, key, build_keyed):
+    """Return (cached_valid: bool, elapsed_seconds: float | None) for one entry.
+
+    The wall time comes from the newest record of any build, so a new build
+    still starts with an ETA from the last one.
+    """
+    valid = find_record(
+        cache_dir, library, code, key, settings={"library": library}, build_keyed=build_keyed
+    ) is not None
+    newest = latest_record(cache_dir, library, code, key)
+    elapsed = newest[1].get("run", {}).get("elapsed_seconds") if newest else None
     return valid, (float(elapsed) if isinstance(elapsed, (int, float)) else None)
 
 
@@ -102,26 +98,21 @@ def real_codes(base_codes: list[str], task: Task) -> list[str]:
     return [f"{base}-{t}" for base in base_codes for t in treatments]
 
 
-def _code_meta(code: str, task: Task, fingerprint: dict) -> dict:
-    """Minimal cache-validity meta for the up-front estimate.
+def _build_keyed(code: str, task: Task, backends: Backends) -> bool:
+    """Whether ``code``'s records must come from the installed build.
 
-    A matching library is enough for most OpenMC references. Those of the
-    photon-bearing families must also match the OpenMC build, and YAMC must
-    match the current yamc build fingerprint (a new build invalidates its cache).
+    yamc always; OpenMC for the photon-bearing families while OpenMC runs, the
+    same rule their run loops pass to the cache.
     """
-    meta = {"library": task.library}
     if code.startswith("yamc"):
-        meta = {**meta, **fingerprint}
-    elif task.family in OPENMC_BUILD_KEYED_FAMILIES:
-        meta = {**meta, **openmc_fingerprint()}
-    return meta
+        return True
+    return task.family in OPENMC_BUILD_KEYED_FAMILIES and backends.run_openmc
 
 
 def build_state(tasks: list[Task], backends: Backends) -> dict:
     """Build the initial dashboard state (see :mod:`yamc_verify.dashboard`)."""
-    fingerprint = yamc_fingerprint()
     state = {
-        "yamc_version": fingerprint.get("yamc_version", "?"),
+        "yamc_version": code_identity("yamc")["version"],
         "yamc_built_ago": yamc_build_age(),
         "tasks": [],
     }
@@ -133,11 +124,11 @@ def build_state(tasks: list[Task], backends: Backends) -> dict:
             items = []
         code_entries = {}
         for code in codes:
-            meta = _code_meta(code, task, fingerprint)
+            keyed = _build_keyed(code, task, backends)
             cached = 0
             seed_times = []
             for key in items:
-                valid, elapsed = _cache_info(task.cache_dir, task.library, code, key, meta)
+                valid, elapsed = _cache_info(task.cache_dir, task.library, code, key, keyed)
                 if valid:
                     cached += 1
                 if elapsed is not None:
