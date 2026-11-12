@@ -10,7 +10,6 @@ import os
 from dataclasses import dataclass
 
 VALID_BACKENDS = ("openmc-cpu", "yamc-cpu", "yamc-gpu")
-DEFAULT_BACKENDS = "openmc-cpu,yamc-cpu,yamc-gpu"
 
 
 @dataclass(frozen=True)
@@ -42,21 +41,27 @@ class Backends:
 
 
 def resolve(raw: str | None = None) -> Backends:
-    """Resolve backends from ``raw`` (defaults to the ``MC_BACKENDS`` env var).
+    """Resolve backends from ``raw``, or from the ``MC_BACKENDS`` env var if ``raw`` is None.
 
-    Raises ``ValueError`` on unknown tokens or an empty selection.
+    There is no default selection: the caller must name the backends.
+
+    Raises ``ValueError`` if nothing is given, or on unknown tokens.
     """
     if raw is None:
-        raw = os.environ.get("MC_BACKENDS", DEFAULT_BACKENDS)
+        raw = os.environ.get("MC_BACKENDS", "")
     tokens = [b.strip().lower() for b in raw.split(",") if b.strip()]
+    if not tokens:
+        raise ValueError(
+            "MC_BACKENDS is not set. Name the backends to run as a "
+            f"comma-separated subset of {list(VALID_BACKENDS)}, "
+            "e.g. MC_BACKENDS=openmc-cpu,yamc-cpu"
+        )
     bad = [b for b in tokens if b not in VALID_BACKENDS]
     if bad:
         raise ValueError(
             f"MC_BACKENDS contains unknown token(s) {bad}; "
             f"valid tokens are {list(VALID_BACKENDS)}"
         )
-    if not tokens:
-        raise ValueError("MC_BACKENDS resolved to an empty list")
     run_openmc = "openmc-cpu" in tokens
     computes = [b.split("-", 1)[1] for b in tokens if b.startswith("yamc-")]
     return Backends(tokens=tokens, run_openmc=run_openmc, computes=computes)
