@@ -159,6 +159,8 @@ from it (there are no notebooks):
 - `progress.py`, `plan.py`, `dashboard.py`, `orchestrator.py` — the live
   dashboard: a progress side-channel, the up-front plan, rendering, and the runner.
 - `index_builder.py`: builds the `benchmarks-index.json` the web page reads.
+- `environments.py`: one Python environment per code version (`openmc==X`,
+  `yamc==X`, `yamc@<commit>`); see [One environment per code version](#one-environment-per-code-version).
 
 Running one task in code is roughly:
 
@@ -255,6 +257,32 @@ pip install -e ../core/packages/yamc-core
 
 The build replaces the PyPI wheel, and its new extension hash re-keys the YAMC
 cache (see [Results cache](#results-cache)).
+
+## One environment per code version
+
+To compare builds, each code version can have its own environment, built once
+under `~/.cache/yamc-verification/envs/` and reused:
+
+```bash
+python -m yamc_verify.environments ensure openmc==0.16.1.dev0 yamc==0.21.0 yamc@86ef200e
+python -m yamc_verify.environments list
+```
+
+- `openmc==<version>` installs that OpenMC wheel from the wheels index named in
+  `requirements.txt`. Only versions published there can be installed; asking for
+  another lists the ones that are.
+- `yamc==<version>` installs that `yamc-core` release from PyPI.
+- `yamc@<commit>` builds `yamc-core` at that commit from a local core checkout
+  (`--core-dir`, else `$YAMC_CORE_ROOT`, else `../core`), in a temporary worktree
+  with its own Cargo target directory. The commit must include the build commit
+  record (`yamc.__commit__`), which is how the environment is checked.
+
+Every environment also has the verification dependencies and the other code at
+its latest release, which the tools use to find nuclear data. It is checked
+after it is built (the version, and for a commit that the build reports that
+commit with no uncommitted changes) and only then marked ready. Environments
+use the Python that runs the command, so an OpenMC wheel must exist for that
+Python version.
 
 ## The benchmark database page (the site)
 
