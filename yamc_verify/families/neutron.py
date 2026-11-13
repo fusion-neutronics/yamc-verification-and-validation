@@ -437,8 +437,6 @@ def discover(task: Task, run_openmc: bool) -> list[str]:
 
 
 def _metas(task: Task):
-    from cache_utils import yamc_fingerprint
-
     openmc_meta = {
         "library": task.library, "particles": task.particles,
         "batches": task.batches, "source_energy": task.source_energy,
@@ -446,7 +444,7 @@ def _metas(task: Task):
         # already cached stay valid.
         **({"seed": _seed()} if _seed() != 1 else {}),
     }
-    yamc_meta = {**openmc_meta, **yamc_fingerprint()}
+    yamc_meta = dict(openmc_meta)
     return openmc_meta, yamc_meta
 
 
@@ -481,7 +479,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
             try:
                 per["openmc"] = run_step(
                     cache_dir, task.library, "openmc", _cache_key(nuclide),
-                    lambda n=nuclide: run_openmc_simulation(n, task), meta=openmc_meta, cache=True)
+                    lambda n=nuclide: run_openmc_simulation(n, task), settings=openmc_meta, cache=True)
             except Exception as e:  # noqa: BLE001 - isolate backend failures
                 print(f"  OpenMC Error ({nuclide}): {e}")
         for compute in b.computes:
@@ -495,7 +493,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
             try:
                 per[f"yamc-{compute}"] = run_step(
                     cache_dir, task.library, f"yamc-{compute}", _cache_key(nuclide), _run,
-                    meta=yamc_meta, cache=task.caches_yamc)
+                    settings=yamc_meta, cache=task.caches_yamc)
                 if first_yamc_model is None and "model" in captured:
                     first_yamc_model = captured["model"]
             except Exception as e:  # noqa: BLE001

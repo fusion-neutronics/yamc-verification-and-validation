@@ -22,10 +22,10 @@ NUCLEAR_DATA_DIR = {
     "fendl-3.2d": "/home/jon/nuclear_data/fendl-3.2d-hdf5/",
 }
 
-# Families whose OpenMC references are keyed by the OpenMC build as well as by
-# their run parameters (cache_utils.openmc_fingerprint): their photon physics
+# Families whose OpenMC references must come from the installed OpenMC build
+# while OpenMC runs, as well as match their run settings: their photon physics
 # changed with the build (openmc#4036 corrected Compton shell selection and
-# Doppler broadening). Their metadata builders add it when OpenMC runs.
+# Doppler broadening). Their run loops pass build_keyed to the cache.
 OPENMC_BUILD_KEYED_FAMILIES = ("photon", "secondary-photon", "decay-photon")
 
 

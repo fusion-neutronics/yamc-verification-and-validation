@@ -1,32 +1,50 @@
-"""JSON cache for verification-notebook simulation results.
+"""Result records for the verification tasks.
 
-Each cache entry is a single JSON file at
-``<cache_dir>/<library>/<code>/<key>.json`` with the shape::
+Every simulation result is a self-describing JSON record at::
 
-    {"_meta": {...run parameters that produced this result...},
-     "results": {...arbitrary results dict, numpy arrays JSON-encoded...}}
+    <cache_dir>/<library>/<code>/<item>/<build_id>.json
 
-Numpy arrays are encoded as ``{"_np_array": [...], "_dtype": "..."}`` and
-restored on load. The cache is invalidated automatically when the metadata
-in the cached file does not match the metadata passed by the caller (e.g.
-``PARTICLES`` or ``BATCHES`` changed), so the simulation is re-run and the
-cache file overwritten.
+with the shape::
 
-The module is imported by the notebooks under ``tasks/`` to avoid re-running
-simulations every notebook session. OpenMC reference results are keyed by run
-parameters, and those of the photon-bearing families also by the OpenMC build
-(:func:`openmc_fingerprint`). YAMC results additionally fold
-:func:`yamc_fingerprint` into their metadata, so the cache auto-invalidates and
-the simulation re-runs whenever the installed yamc version or compiled core
-(``_core*.so``) changes. Set ``YAMC_VERIFY_ACCEPT_OLD_CACHE=1`` to accept
-previously cached YAMC results regardless of which build produced them.
+    {"schema": 1,
+     "library": "endf-b8.1", "code": "yamc-cpu", "item": "Fe56",
+     "code_identity": {"name": "yamc", "version": "0.21.0",
+                       "commit": "86ef200e...", "dirty": false,
+                       "binary_sha": null, "backend": "cpu",
+                       "build_id": "0.21.0+g86ef200e6a0e"},
+     "settings": {...run parameters...},
+     "settings_hash": "...",
+     "run": {"date": "2026-11-12T20:41:07+00:00", "host": "...",
+             "elapsed_seconds": 812.4},
+     "results": {...numpy arrays JSON-encoded...}}
+
+A record is never overwritten by a different build: a new yamc commit or a new
+OpenMC release writes a record next to the old one, so results from two builds
+can be compared. Re-running the same build with the same settings replaces its
+own record. Numpy arrays are encoded as ``{"_np_array": [...], "_dtype": "..."}``
+and restored on load.
+
+Which record satisfies a run:
+
+* **yamc** codes always need a record from the installed build.
+* **OpenMC** codes need one from the installed OpenMC only when the caller asks
+  (``build_keyed=True``), which the photon-bearing families do while running
+  OpenMC: their references changed with the OpenMC build (openmc#4036). Other
+  OpenMC references are keyed by settings alone, and the most recent matching
+  record is used.
+
+Set ``YAMC_VERIFY_ACCEPT_OLD_CACHE=1`` to accept the most recent record with
+matching settings from any build.
 """
 
 from __future__ import annotations
 
+import datetime
 import functools
+import hashlib
 import json
 import os
+import socket
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
@@ -75,38 +93,100 @@ def _decode(obj: Any) -> Any:
     return obj
 
 
-def _cache_path(cache_dir: Path | str, library: str, code: str, key: str) -> Path:
+RECORD_SCHEMA = 1
+
+
+def _record_dir(cache_dir: Path | str, library: str, code: str, key: str) -> Path:
     safe_key = str(key).replace("/", "_")
-    return Path(cache_dir) / str(library) / str(code) / f"{safe_key}.json"
+    return Path(cache_dir) / str(library) / str(code) / safe_key
 
 
-def _meta_matches(cached: Mapping, expected: Mapping) -> bool:
-    for k, v in expected.items():
-        if cached.get(k) != v:
-            return False
-    return True
+def settings_hash(settings: Mapping) -> str:
+    """Stable hash of a settings dict, identifying like-for-like runs across builds."""
+    canonical = json.dumps(_encode(dict(settings)), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
-def load_cached(
+def _settings_match(stored: Mapping, expected: Mapping) -> bool:
+    return all(stored.get(k) == v for k, v in expected.items())
+
+
+def _read(path: Path) -> Optional[dict]:
+    try:
+        with path.open() as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if data.get("schema") == RECORD_SCHEMA else None
+
+
+def iter_records(cache_dir: Path | str, library: str, code: str, key: str):
+    """Yield ``(path, record)`` for every readable record of one item, newest first."""
+    d = _record_dir(cache_dir, library, code, key)
+    if not d.is_dir():
+        return
+    found = []
+    for path in d.glob("*.json"):
+        record = _read(path)
+        if record is not None:
+            found.append((record.get("run", {}).get("date", ""), path, record))
+    for _, path, record in sorted(found, key=lambda t: t[0], reverse=True):
+        yield path, record
+
+
+def cached_items(cache_dir: Path | str, library: str, code: str) -> list[str]:
+    """Item keys that have at least one record for ``code``."""
+    d = Path(cache_dir) / str(library) / str(code)
+    if not d.is_dir():
+        return []
+    return sorted(p.name for p in d.iterdir() if p.is_dir() and any(p.glob("*.json")))
+
+
+def latest_record(cache_dir, library, code, key) -> Optional[tuple[Path, dict]]:
+    """The most recent record of one item from any build, or ``None``."""
+    return next(iter_records(cache_dir, library, code, key), None)
+
+
+def _uses_build(code: str, build_keyed: Optional[bool]) -> bool:
+    if _accept_old_cache():
+        return False
+    if build_keyed is not None:
+        return build_keyed
+    return code_name(code) == "yamc"
+
+
+def find_record(
     cache_dir: Path | str,
     library: str,
     code: str,
     key: str,
     *,
-    expected_meta: Optional[Mapping] = None,
-) -> Optional[dict]:
-    """Return the cached results dict, or ``None`` if no usable cache exists."""
-    p = _cache_path(cache_dir, library, code, key)
-    if not p.exists():
+    settings: Optional[Mapping] = None,
+    build_keyed: Optional[bool] = None,
+) -> Optional[tuple[Path, dict]]:
+    """The record that satisfies a run of ``code`` on ``key``, or ``None``.
+
+    ``settings`` must be a subset of the record's settings. ``build_keyed``
+    defaults to ``True`` for yamc codes and ``False`` for OpenMC (see the module
+    docstring); either way ``YAMC_VERIFY_ACCEPT_OLD_CACHE`` turns it off.
+    """
+    expected = dict(settings or {})
+    if _uses_build(code, build_keyed):
+        path = _record_dir(cache_dir, library, code, key) / f"{code_identity(code)['build_id']}.json"
+        record = _read(path) if path.exists() else None
+        if record is not None and _settings_match(record.get("settings", {}), expected):
+            return path, record
         return None
-    try:
-        with p.open() as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-    if expected_meta is not None and not _meta_matches(data.get("_meta", {}), expected_meta):
-        return None
-    return _decode(data.get("results"))
+    for path, record in iter_records(cache_dir, library, code, key):
+        if _settings_match(record.get("settings", {}), expected):
+            return path, record
+    return None
+
+
+def load_cached(cache_dir, library, code, key, *, settings=None, build_keyed=None) -> Optional[dict]:
+    """Return the decoded results of the record :func:`find_record` picks, or ``None``."""
+    found = find_record(cache_dir, library, code, key, settings=settings, build_keyed=build_keyed)
+    return None if found is None else _decode(found[1].get("results"))
 
 
 def save_cached(
@@ -116,15 +196,33 @@ def save_cached(
     key: str,
     results: Mapping,
     *,
-    meta: Optional[Mapping] = None,
+    settings: Optional[Mapping] = None,
+    elapsed_seconds: Optional[float] = None,
+    identity: Optional[Mapping] = None,
 ) -> Path:
-    """Write ``results`` to the cache file and return its path."""
-    p = _cache_path(cache_dir, library, code, key)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"_meta": dict(meta or {}), "results": _encode(dict(results))}
-    with p.open("w") as f:
-        json.dump(payload, f, indent=2)
-    return p
+    """Write a record for the installed build of ``code`` and return its path."""
+    identity = dict(identity or code_identity(code))
+    settings = dict(settings or {})
+    path = _record_dir(cache_dir, library, code, key) / f"{identity['build_id']}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schema": RECORD_SCHEMA,
+        "library": library,
+        "code": code,
+        "item": key,
+        "code_identity": identity,
+        "settings": _encode(settings),
+        "settings_hash": settings_hash(settings),
+        "run": {
+            "date": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+            "host": socket.gethostname(),
+            "elapsed_seconds": elapsed_seconds,
+        },
+        "results": _encode(dict(results)),
+    }
+    with path.open("w") as f:
+        json.dump(record, f, indent=2)
+    return path
 
 
 def cached_or_run(
@@ -134,44 +232,39 @@ def cached_or_run(
     key: str,
     run_fn: Callable[[], Mapping],
     *,
-    meta: Optional[Mapping] = None,
+    settings: Optional[Mapping] = None,
+    build_keyed: Optional[bool] = None,
     verbose: bool = True,
 ) -> dict:
-    """Return cached results if available with matching ``meta``, else run and cache.
+    """Return the matching record's results, else run ``run_fn`` and record them.
 
     ``run_fn`` is a zero-argument callable that returns a results dict.
 
     Emits progress events (see :mod:`yamc_verify.progress`) so the verification
-    orchestrator can render a live dashboard: a ``cached`` event on a cache hit,
-    or an ``item_start`` / ``computed`` pair (with wall-clock seconds) on a run.
-    The wall time is also stored under ``elapsed_seconds`` in the cache metadata
-    so a later orchestrator run can seed its ETA estimate. Reporting is a no-op
-    outside an orchestrated run and never affects the returned results.
+    orchestrator can render a live dashboard: a ``cached`` event on a hit, or an
+    ``item_start`` / ``computed`` pair (with wall-clock seconds) on a run. The
+    wall time is stored in the record so a later run can seed its ETA estimate.
     """
     import time
 
     _p = _progress()
-    cached = load_cached(cache_dir, library, code, key, expected_meta=meta)
-    p = _cache_path(cache_dir, library, code, key)
-    if cached is not None:
+    found = find_record(cache_dir, library, code, key, settings=settings, build_keyed=build_keyed)
+    if found is not None:
         if _p:
             _p.report_item(code, key, status="cached")
         if verbose:
-            print(f"  {code}: loaded from cache ({p})")
-        return cached
+            print(f"  {code}: loaded from cache ({found[0]})")
+        return _decode(found[1].get("results"))
     if _p:
         _p.report_item_start(code, key)
     t0 = time.perf_counter()
     results = run_fn()
     dt = time.perf_counter() - t0
-    save_cached(
-        cache_dir, library, code, key, results,
-        meta={**dict(meta or {}), "elapsed_seconds": dt},
-    )
+    path = save_cached(cache_dir, library, code, key, results, settings=settings, elapsed_seconds=dt)
     if _p:
         _p.report_item(code, key, status="computed", seconds=dt)
     if verbose:
-        print(f"  {code}: cached to {p}")
+        print(f"  {code}: cached to {path}")
     return dict(results)
 
 
@@ -279,19 +372,15 @@ def requested_items(kind: str) -> list[str]:
 
 
 @functools.lru_cache(maxsize=1)
-def _yamc_core_hash() -> Optional[str]:
+def _yamc_binary_sha() -> Optional[str]:
     """Short content hash of the compiled yamc core (``_core*.so``), or ``None``.
 
-    Identifies the actual binary in use: it changes when the extension is
-    rebuilt (``maturin develop``) but NOT when a git checkout, merge, or pull
-    moves the source repo's HEAD without touching the binary. That is the whole
-    point of keying on the artifact rather than the commit, so a no-op merge no
-    longer invalidates every cached YAMC result. ``None`` when no compiled
-    extension can be found (e.g. a pure-Python stand-in).
+    Part of the build id only when the commit cannot identify the binary on its
+    own: a wheel that predates ``yamc.__commit__``, or a build from a checkout
+    with uncommitted changes, where each rebuild must still get its own record.
     """
     try:
         import glob
-        import hashlib
 
         import yamc
 
@@ -310,17 +399,42 @@ def _yamc_core_hash() -> Optional[str]:
         return None
 
 
-@functools.lru_cache(maxsize=1)
-def openmc_fingerprint() -> dict:
-    """Identity of the OpenMC that runs the references, for cache invalidation.
+def code_name(code: str) -> str:
+    """``"openmc"`` or ``"yamc"`` for a cache code label such as ``yamc-cpu-ttb``."""
+    name = str(code).split("-", 1)[0]
+    if name not in ("openmc", "yamc"):
+        raise ValueError(f"cache code {code!r} names neither openmc nor yamc")
+    return name
 
-    Returns ``{"openmc_version": ..., "openmc_commit": ...}`` as ``openmc
-    --version`` prints them for the executable on ``PATH``, the one
-    ``openmc.Model.run`` starts. The photon-bearing families fold it into their
-    OpenMC cache metadata: their references changed with the OpenMC build
-    (openmc#4036 corrected Compton shell selection and Doppler broadening), so a
-    reference made by another build re-runs.
+
+def _backend(code: str) -> Optional[str]:
+    parts = str(code).split("-")
+    return parts[1] if code_name(code) == "yamc" and len(parts) > 1 else None
+
+
+def build_id(version: Optional[str], commit: Optional[str], dirty: Optional[bool],
+             binary_sha: Optional[str]) -> str:
+    """File-name-safe id of one build: ``<version>+g<commit12>[.dirty][.so<sha>]``.
+
+    The binary hash is included only when the commit does not pin the binary
+    (unknown or dirty). With neither, the build is ``<version>+unknown``, and
+    with no version either, ``unknown``.
     """
+    out = str(version or "unknown")
+    if commit:
+        out += f"+g{commit[:12]}"
+        if dirty:
+            out += ".dirty"
+    if binary_sha and (not commit or dirty):
+        out += f"{'.' if commit else '+'}so{binary_sha}"
+    if version and not commit and not binary_sha:
+        out += "+unknown"
+    return out
+
+
+@functools.lru_cache(maxsize=1)
+def openmc_identity() -> dict:
+    """Name, version and commit of the OpenMC on ``PATH`` (the one ``Model.run`` starts)."""
     import re
     import shutil
     import subprocess
@@ -328,41 +442,37 @@ def openmc_fingerprint() -> dict:
     exe = shutil.which("openmc")
     if exe is None:
         raise FileNotFoundError(
-            "No openmc executable on PATH: the OpenMC references need one, and their "
-            "cache records its version and commit."
+            "No openmc executable on PATH: the OpenMC references need one, and each "
+            "record stores its version and commit."
         )
     out = subprocess.run([exe, "--version"], capture_output=True, text=True, check=True).stdout
     version = re.search(r"OpenMC version (\S+)", out)
     commit = re.search(r"Commit hash: (\S+)", out)
     if version is None or commit is None:
         raise RuntimeError(f"Could not read the version and commit from `{exe} --version`:\n{out}")
-    return {"openmc_version": version.group(1), "openmc_commit": commit.group(1)}
+    v, c = version.group(1), commit.group(1)
+    return {"name": "openmc", "version": v, "commit": c, "dirty": None,
+            "binary_sha": None, "build_id": build_id(v, c, None, None)}
+
+
+@functools.lru_cache(maxsize=1)
+def _yamc_identity() -> dict:
+    import yamc
+
+    commit = getattr(yamc, "__commit__", None)
+    dirty = getattr(yamc, "__commit_dirty__", None)
+    sha = _yamc_binary_sha() if (not commit or dirty) else None
+    return {"name": "yamc", "version": yamc.__version__, "commit": commit, "dirty": dirty,
+            "binary_sha": sha, "build_id": build_id(yamc.__version__, commit, dirty, sha)}
+
+
+def code_identity(code: str) -> dict:
+    """The installed build behind a cache code label, as stored in each record."""
+    if code_name(code) == "openmc":
+        return {**openmc_identity(), "backend": None}
+    return {**_yamc_identity(), "backend": _backend(code)}
 
 
 def _accept_old_cache() -> bool:
-    """Whether ``YAMC_VERIFY_ACCEPT_OLD_CACHE`` opts out of build-based invalidation."""
+    """Whether ``YAMC_VERIFY_ACCEPT_OLD_CACHE`` accepts records from any build."""
     return os.environ.get(ACCEPT_OLD_CACHE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def yamc_fingerprint() -> dict:
-    """Identity of the installed yamc, for cache invalidation.
-
-    Returns ``{"yamc_version": yamc.__version__, "yamc_core_sha": ...}``. Fold
-    this into the ``meta`` of a YAMC cache entry so the cache invalidates
-    automatically (and the simulation re-runs) whenever the *compiled* yamc core
-    changes. Keying on a content hash of ``_core*.so`` (rather than the git
-    commit) means a checkout / merge / pull that leaves the binary untouched
-    keeps the cache valid, while a real ``maturin develop`` rebuild invalidates
-    it. ``yamc_core_sha`` is ``None`` when no compiled extension is found,
-    leaving the version as the invalidation key.
-
-    When ``YAMC_VERIFY_ACCEPT_OLD_CACHE`` is set this returns ``{}``, so YAMC
-    results are keyed by run parameters only and any previously cached result is
-    accepted regardless of which build produced it. Use it when you know the
-    current binary matches the cached results and want to skip a recompute.
-    """
-    if _accept_old_cache():
-        return {}
-    import yamc
-
-    return {"yamc_version": yamc.__version__, "yamc_core_sha": _yamc_core_hash()}

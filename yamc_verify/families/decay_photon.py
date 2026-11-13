@@ -530,15 +530,12 @@ def discover(task: Task, run_openmc: bool) -> list[tuple]:
         task.nuclear_data_dir, task.library, chain_file, transmutation_data)
 
 
-def _openmc_meta(task: Task, *, openmc_build: bool) -> dict:
-    """OpenMC cache metadata (byte-matching the notebook's OPENMC_CACHE_META).
+def _openmc_meta(task: Task) -> dict:
+    """OpenMC run settings. The YAMC settings build on them.
 
-    With ``openmc_build`` it also folds in ``openmc_fingerprint()``, so a
-    reference made by another OpenMC build re-runs. The YAMC meta builds on the
-    rest of it without the OpenMC build, and a yamc-only run needs no OpenMC.
+    The OpenMC build is recorded by the cache layer, and the reference is
+    build-keyed by the caller while OpenMC runs (see run_all).
     """
-    from cache_utils import openmc_fingerprint
-
     meta = {
         "library": task.library,
         "particles": task.particles,
@@ -554,8 +551,6 @@ def _openmc_meta(task: Task, *, openmc_build: bool) -> dict:
     meta["chain_file"] = discovery.resolve_openmc_chain(task.library)
     meta["d1s_timesteps"] = list(task.extras["timesteps"])
     meta["d1s_source_rates"] = list(task.extras["source_rates"])
-    if openmc_build:
-        meta.update(openmc_fingerprint())
     return meta
 
 
@@ -568,13 +563,11 @@ def direct_products_only() -> bool:
 
 
 def _yamc_meta(task: Task) -> dict:
-    """YAMC D1S cache metadata: the OpenMC meta plus the build fingerprint,
-    whether the emitter set was restricted to the direct products, and the chain
-    yamc's network read (``"full"``, the library's chain unreduced). A result
-    cached without that key may come from a reduced chain, so it re-runs."""
-    from cache_utils import yamc_fingerprint
-
-    return {**_openmc_meta(task, openmc_build=False), **yamc_fingerprint(),
+    """YAMC D1S run settings: the OpenMC settings plus whether the emitter set
+    was restricted to the direct products, and the chain yamc's network read
+    (``"full"``, the library's chain unreduced). A result recorded without that
+    key may come from a reduced chain, so it re-runs."""
+    return {**_openmc_meta(task),
             "direct_products_only": direct_products_only(),
             "yamc_chain": "full"}
 
@@ -585,12 +578,12 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     ``cache_dir`` is resolved relative to the current working directory, which
     when run under nbconvert is the notebook's own directory (so the default
     ``"cache"`` lands in ``tasks/<family>/<geometry>/cache`` as before). Both
-    OpenMC and YAMC are cached (YAMC keyed by build fingerprint).
+    OpenMC and YAMC are cached (each record keyed by the build that made it).
     """
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
-    openmc_meta = _openmc_meta(task, openmc_build=b.run_openmc)
+    openmc_meta = _openmc_meta(task)
     yamc_meta = _yamc_meta(task)
     timesteps = task.extras["timesteps"]
     phases = task.extras["phases"]
@@ -614,7 +607,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                     cache_dir, task.library, "openmc", nuclide,
                     lambda n=nuclide, npath=neutron_path, el=element, ppath=photon_path:
                         run_openmc_d1s(n, npath, el, ppath, task),
-                    meta=openmc_meta, cache=True,
+                    settings=openmc_meta, build_keyed=b.run_openmc, cache=True,
                 )
                 print(f"    {openmc_result['elapsed']:.1f}s, "
                       f"{len(openmc_result['radionuclides'])} radionuclides")
@@ -642,7 +635,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                 print(f"  Running YAMC D1S ({compute})...")
                 yamc_result = run_step(
                     cache_dir, task.library, f"yamc-{compute}", nuclide, _run,
-                    meta=yamc_meta, cache=task.caches_yamc,
+                    settings=yamc_meta, cache=task.caches_yamc,
                 )
                 yamc_by_compute[compute] = yamc_result
                 if first_yamc_model is None and "model" in captured:

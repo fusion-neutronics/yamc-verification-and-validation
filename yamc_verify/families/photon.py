@@ -455,17 +455,12 @@ def discover(task: Task, run_openmc: bool) -> list[str]:
     return discovery.discover_photon_elements(task.nuclear_data_dir, task.library, run_openmc)
 
 
-def _metas(task: Task, *, openmc_build: bool):
-    """OpenMC + YAMC cache metas, geometry-dependent to byte-match the notebooks.
+def _metas(task: Task):
+    """OpenMC + YAMC run settings, geometry-dependent.
 
-    The YAMC meta folds in ``yamc_fingerprint()`` so the YAMC cache auto-
-    invalidates on a new yamc build (same policy as neutron). With
-    ``openmc_build`` the OpenMC meta also folds in ``openmc_fingerprint()``, so
-    a reference made by another OpenMC build re-runs. It is asked for only when
-    OpenMC runs, so a yamc-only run needs no OpenMC.
+    The build of each code is recorded by the cache layer, not here. OpenMC
+    references are build-keyed by the caller while OpenMC runs (see run_all).
     """
-    from cache_utils import openmc_fingerprint, yamc_fingerprint
-
     openmc_meta = {
         "library": task.library,
         "particles": task.particles,
@@ -477,9 +472,7 @@ def _metas(task: Task, *, openmc_build: bool):
     elif task.geometry == "broomstick":
         openmc_meta["cylinder_radius"] = task.dims.cylinder_radius
         openmc_meta["cylinder_half_height"] = task.dims.cylinder_half_height
-    yamc_meta = {**openmc_meta, **yamc_fingerprint()}
-    if openmc_build:
-        openmc_meta = {**openmc_meta, **openmc_fingerprint()}
+    yamc_meta = dict(openmc_meta)
     return openmc_meta, yamc_meta
 
 
@@ -489,12 +482,12 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     ``cache_dir`` is resolved relative to the current working directory, which
     when run under nbconvert is the notebook's own directory (so the default
     ``"cache"`` lands in ``tasks/photon/<geometry>/cache`` as before). Both
-    OpenMC and YAMC are cached (YAMC keyed by build fingerprint).
+    OpenMC and YAMC are cached (each record keyed by the build that made it).
     """
     from ..backends import resolve
 
     b = backends if backends is not None else resolve()
-    openmc_meta, yamc_meta = _metas(task, openmc_build=b.run_openmc)
+    openmc_meta, yamc_meta = _metas(task)
     elements = discover(task, b.run_openmc)
     print(f"Running photon simulations for {len(elements)} elements: {elements}")
 
@@ -513,7 +506,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
             try:
                 per[f"yamc-{compute}"] = run_step(
                     cache_dir, task.library, f"yamc-{compute}", element, _run,
-                    meta=yamc_meta, cache=task.caches_yamc)
+                    settings=yamc_meta, cache=task.caches_yamc)
                 if first_yamc_model is None and "model" in captured:
                     first_yamc_model = captured["model"]
             except Exception as e:  # noqa: BLE001 - isolate backend failures
@@ -523,7 +516,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                 per["openmc"] = run_step(
                     cache_dir, task.library, "openmc", element,
                     lambda el=element: run_openmc_simulation(el, task),
-                    meta=openmc_meta, cache=True)
+                    settings=openmc_meta, build_keyed=b.run_openmc, cache=True)
             except Exception as e:  # noqa: BLE001
                 print(f"  OpenMC Error ({element}): {e}")
         if per:

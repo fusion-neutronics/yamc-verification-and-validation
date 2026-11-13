@@ -17,6 +17,9 @@ from cache_utils import load_cached, save_cached
 from yamc_verify import tasks
 from yamc_verify.families import transmutation
 
+# A stand-in build: these tests are about the settings, not the code identity.
+_ANY_BUILD = {"name": "test", "build_id": "test"}
+
 SETTINGS = ("transmutation_decay_data", "transmutation_reactions", "transmutation_fission_yields")
 REACTION_RATE = "transmutation/material-reaction-rate/endf-b8.1"
 FLUX_SPECTRUM = "transmutation/material-flux-spectrum/endf-b8.1"
@@ -161,13 +164,13 @@ def test_no_reduction_level_is_configured(key):
 
 @pytest.mark.parametrize("key", [REACTION_RATE, FLUX_SPECTRUM])
 def test_a_result_cached_on_a_reduced_chain_reruns(key, tmp_path, monkeypatch):
-    # Keep yamc out of the build fingerprint: this test is about the chain key.
+    # Accept a record from any build: this test is about the chain key.
     monkeypatch.setenv("YAMC_VERIFY_ACCEPT_OLD_CACHE", "1")
     task = tasks.get_task(key)
     for code, meta in zip(("openmc", "yamc"), transmutation._metas(task, CHAIN_FILE)):
         assert meta["chain"] == "full" and "reduce_level" not in meta
         reduced = {k: v for k, v in meta.items() if k != "chain"} | {"reduce_level": 4}
-        save_cached(tmp_path, task.library, code, "Ag107", {"steps": []}, meta=reduced)
-        assert load_cached(tmp_path, task.library, code, "Ag107", expected_meta=meta) is None
-        save_cached(tmp_path, task.library, code, "Ag107", {"steps": []}, meta=meta)
-        assert load_cached(tmp_path, task.library, code, "Ag107", expected_meta=meta) is not None
+        save_cached(tmp_path, task.library, code, "Ag107", {"steps": []}, settings=reduced, identity=_ANY_BUILD)
+        assert load_cached(tmp_path, task.library, code, "Ag107", settings=meta) is None
+        save_cached(tmp_path, task.library, code, "Ag107", {"steps": []}, settings=meta, identity=_ANY_BUILD)
+        assert load_cached(tmp_path, task.library, code, "Ag107", settings=meta) is not None

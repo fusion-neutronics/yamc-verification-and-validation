@@ -762,16 +762,12 @@ def discover(task: Task, run_openmc: bool) -> list[tuple]:
     return discovery.discover_coupled_nuclides(task.nuclear_data_dir, task.library, run_openmc)
 
 
-def _metas(task: Task, electron_treatment: str, *, openmc_build: bool):
-    """OpenMC + YAMC cache metas for one electron treatment.
+def _metas(task: Task, electron_treatment: str):
+    """OpenMC + YAMC run settings for one electron treatment.
 
-    The YAMC meta folds in ``yamc_fingerprint()``. With ``openmc_build`` the
-    OpenMC meta also folds in ``openmc_fingerprint()``, so a reference made by
-    another OpenMC build re-runs. It is asked for only when OpenMC runs, so a
-    yamc-only run needs no OpenMC.
+    The build of each code is recorded by the cache layer, not here. OpenMC
+    references are build-keyed by the caller while OpenMC runs (see run_all).
     """
-    from cache_utils import openmc_fingerprint, yamc_fingerprint
-
     openmc_meta = {
         "library": task.library,
         "electron_treatment": electron_treatment,
@@ -786,9 +782,7 @@ def _metas(task: Task, electron_treatment: str, *, openmc_build: bool):
     else:
         openmc_meta["cylinder_radius"] = task.dims.cylinder_radius
         openmc_meta["cylinder_half_height"] = task.dims.cylinder_half_height
-    yamc_meta = {**openmc_meta, **yamc_fingerprint()}
-    if openmc_build:
-        openmc_meta = {**openmc_meta, **openmc_fingerprint()}
+    yamc_meta = dict(openmc_meta)
     return openmc_meta, yamc_meta
 
 
@@ -799,7 +793,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     relative to the current working directory (the notebook's own directory
     under nbconvert), so the default ``"cache"`` lands in
     ``tasks/secondary-photon/<geometry>/cache`` as before. Both OpenMC and
-    YAMC are cached (YAMC keyed by build fingerprint).
+    YAMC are cached (each record keyed by the build that made it).
     """
     from ..backends import resolve
 
@@ -822,7 +816,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
         # so both live side by side; the result keys carry the treatment suffix
         # and `display_results` groups by treatment.
         for treatment in treatments:
-            openmc_meta, yamc_meta = _metas(task, treatment, openmc_build=b.run_openmc)
+            openmc_meta, yamc_meta = _metas(task, treatment)
 
             if b.run_openmc:
                 try:
@@ -831,7 +825,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                         lambda n=nuclide, npath=neutron_path, el=element, ppath=photon_path,
                         t=treatment:
                             run_openmc_simulation(n, npath, el, ppath, task, electron_treatment=t),
-                        meta=openmc_meta, cache=True)
+                        settings=openmc_meta, build_keyed=b.run_openmc, cache=True)
                     print(f"  OpenMC ({treatment}): "
                           f"{per_nuclide[f'openmc-{treatment}']['particles/s']:.0f} particles/s")
                 except Exception as e:  # noqa: BLE001 - isolate backend failures
@@ -850,7 +844,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
                 try:
                     yamc_results = run_step(
                         cache_dir, task.library, f"yamc-{compute}-{treatment}", nuclide, _run,
-                        meta=yamc_meta, cache=task.caches_yamc)
+                        settings=yamc_meta, cache=task.caches_yamc)
                     per_nuclide[f'yamc-{compute}-{treatment}'] = yamc_results
                     if first_yamc_model is None and "model" in captured:
                         first_yamc_model = captured["model"]

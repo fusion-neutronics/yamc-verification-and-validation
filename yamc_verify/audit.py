@@ -25,14 +25,11 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import glob
-import json
-import os
 from dataclasses import dataclass
 
 import numpy as np
 
-from cache_utils import _cache_path, load_cached, yamc_fingerprint
+from cache_utils import _decode, cached_items, code_identity, latest_record
 
 from . import tasks as _tasks
 from .plotting import calculate_spectral_agreement
@@ -57,19 +54,6 @@ class Row:
                 self.max_tally_reldiff if np.isfinite(self.max_tally_reldiff) else 0.0)
 
 
-def _cached_keys(cache_dir, library, code):
-    d = os.path.join(cache_dir, library, code)
-    return {os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(d, "*.json"))}
-
-
-def _yamc_core_sha(cache_dir, library, code, key):
-    try:
-        with open(_cache_path(cache_dir, library, code, key)) as f:
-            return json.load(f).get("_meta", {}).get("yamc_core_sha")
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
 def _max_tally_reldiff(openmc, yamc):
     """Worst relative difference across shared (non-trivial) tally scores."""
     worst, score = 0.0, "-"
@@ -91,7 +75,7 @@ def audit(tasks_list=None, *, current_only=False, raw=False):
     (Compton fluorescence lines, etc.) are removed, matching the dashboard. ``raw``
     grades on the full spectrum, ignoring expected-difference signatures.
     """
-    fp_sha = yamc_fingerprint().get("yamc_core_sha")
+    current_build = code_identity("yamc")["build_id"]
     tasks_list = tasks_list or _tasks.all_tasks()
     rows: list[Row] = []
     unauditable: list[str] = []
@@ -101,16 +85,18 @@ def audit(tasks_list=None, *, current_only=False, raw=False):
         if not t.caches_yamc or not yamc_codes:
             unauditable.append(f"{t.label} [{t.library}] — YAMC not cached (run to compare)")
             continue
-        omc_keys = _cached_keys(t.cache_dir, t.library, "openmc")
+        omc_keys = set(cached_items(t.cache_dir, t.library, "openmc"))
         for backend in yamc_codes:
-            for key in sorted(omc_keys & _cached_keys(t.cache_dir, t.library, backend)):
-                stale = _yamc_core_sha(t.cache_dir, t.library, backend, key) != fp_sha
+            for key in sorted(omc_keys & set(cached_items(t.cache_dir, t.library, backend))):
+                omc_rec = latest_record(t.cache_dir, t.library, "openmc", key)
+                ymc_rec = latest_record(t.cache_dir, t.library, backend, key)
+                if omc_rec is None or ymc_rec is None:
+                    continue
+                stale = ymc_rec[1]["code_identity"]["build_id"] != current_build
                 if current_only and stale:
                     continue
-                omc = load_cached(t.cache_dir, t.library, "openmc", key)
-                ymc = load_cached(t.cache_dir, t.library, backend, key)
-                if omc is None or ymc is None:
-                    continue
+                omc = _decode(omc_rec[1]["results"])
+                ymc = _decode(ymc_rec[1]["results"])
                 if t.family.startswith("transmutation"):
                     row = _transmutation_row(t, key, backend, omc, ymc, stale)
                 else:
