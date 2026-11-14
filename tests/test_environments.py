@@ -46,3 +46,29 @@ def test_check_rejects_the_wrong_version_or_a_dirty_or_other_commit():
         envs._check(parse_code("yamc@bbb"), ident, "bbb")
     with pytest.raises(RuntimeError, match="uncommitted"):
         envs._check(parse_code("yamc@aaa"), {**ident, "yamc": {**ident["yamc"], "dirty": True}}, "aaa")
+
+
+def test_a_release_must_be_listed_for_this_python(monkeypatch):
+    monkeypatch.setattr(envs, "available_versions", lambda name: ["0.23.0", "0.22.0"])
+    envs.check_available("yamc==0.23.0")
+    with pytest.raises(ValueError, match=r"yamc-core 0.21.0 is not on PyPI; available: \['0.23.0', '0.22.0'\]"):
+        envs.check_available("yamc==0.21.0")
+    monkeypatch.setattr(envs, "available_versions", lambda name: [])
+    with pytest.raises(ValueError, match="cannot list the openmc versions on the wheels index for Python"):
+        envs.check_available("openmc==0.16.1.dev0")
+
+
+def test_a_commit_needs_a_core_checkout(tmp_path):
+    with pytest.raises(ValueError, match="no core checkout"):
+        envs.check_available("yamc@86ef200e", core_dir=tmp_path)
+    assert envs.is_ready("yamc@86ef200e", core_dir=tmp_path) is False
+    assert envs.ready_identity("yamc@86ef200e", core_dir=tmp_path) is None
+
+
+def test_readiness_is_read_from_the_ready_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(envs, "ENVS_ROOT", tmp_path)
+    assert not envs.is_ready("yamc==0.23.0")
+    (tmp_path / "yamc-0.23.0").mkdir()
+    (tmp_path / "yamc-0.23.0" / "ready.json").write_text('{"spec": "yamc==0.23.0", "yamc": {"version": "0.23.0"}}')
+    assert envs.is_ready("yamc==0.23.0")
+    assert envs.ready_identity("yamc==0.23.0")["yamc"]["version"] == "0.23.0"

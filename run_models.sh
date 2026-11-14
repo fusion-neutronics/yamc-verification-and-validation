@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 #
-# Run the YAMC-verification tasks with a live, in-place progress dashboard
-# (see yamc_verify/orchestrator.py) instead of scrolling output. Each task is
-# driven directly by `python -m yamc_verify.run_task` with its output captured,
-# so the terminal shows only the indented task > code > counts view.
+# Run the YAMC-verification tasks with the codes installed in this environment
+# and a live, in-place progress display (see yamc_verify/orchestrator.py). To
+# run named code versions, each in its own environment, use `vv run` instead.
+# Each task is driven directly by `python -m yamc_verify.run_task` with its
+# output captured, so the terminal shows only the indented task > code > counts
+# view.
 #
-# Usage (arguments are task keys; the old notebook paths still work too):
+# Usage (arguments are task keys):
 #   MC_BACKENDS=openmc-cpu ./run_models.sh                       # all endf-b8.1 tasks
 #   YAMC_VERIFY_NUMBER_OF_SIMULATIONS=10 MC_BACKENDS=openmc-cpu ./run_models.sh
 #   MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh

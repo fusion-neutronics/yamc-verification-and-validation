@@ -799,7 +799,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
 
     b = backends if backends is not None else resolve()
     treatments = _treatments(task)
-    nuclides = discover(task, b.run_openmc)
+    nuclides = discover(task, b.discover_with_openmc)
     print(f"Running coupled simulations for {len(nuclides)} nuclides "
           f"x {len(treatments)} electron treatment(s) {treatments}...")
     for nuc, _, elem, _ in nuclides:

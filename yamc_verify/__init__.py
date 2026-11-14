@@ -1,23 +1,26 @@
-"""Shared code for the YAMC verification model notebooks.
+"""The yamc verification models, and ``verification()`` to run them.
 
-Extracted from the per-notebook cells to remove duplication: the task registry
-(:mod:`yamc_verify.tasks`), geometry builders, item discovery, progress
-side-channel, per-family simulation runners + plotting/metrics, and the live
-dashboard orchestrator that runs the notebooks with quiet, in-place progress.
+The task registry (:mod:`yamc_verify.tasks`), geometry builders, item
+discovery, per-family simulation runners with plotting and metrics, one Python
+environment per code version (:mod:`yamc_verify.environments`), and
+:func:`verification`, which runs named code versions through the shared ``vv``
+package (also available as ``vv plan`` / ``vv run``).
 """
 from __future__ import annotations
 
-from . import backends, discovery, geometry, progress, tasks
+from . import backends, discovery, geometry, tasks
+from .project import verification, verification_plan
 from .tasks import Task, all_tasks, get_task, task_for_notebook
 
 __all__ = [
     "backends",
     "discovery",
     "geometry",
-    "progress",
     "tasks",
     "Task",
     "all_tasks",
     "get_task",
     "task_for_notebook",
+    "verification",
+    "verification_plan",
 ]

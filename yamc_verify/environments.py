@@ -177,13 +177,70 @@ def _check(spec: CodeSpec, identity: dict, commit: str | None) -> None:
         raise RuntimeError(f"{spec}: the built yamc reports uncommitted changes")
 
 
-def _available_openmc_versions() -> list[str]:
+def available_versions(name: str) -> list[str]:
+    """The published versions of a code's package (``[]`` if they cannot be listed).
+
+    OpenMC comes from the wheels index in ``requirements.txt`` and yamc-core from
+    PyPI, the same places :func:`ensure` installs from.
+    """
     out = subprocess.run(
-        [sys.executable, "-m", "pip", "index", "versions", "openmc", *_index_args()],
+        [sys.executable, "-m", "pip", "index", "versions", _PACKAGES[name], *_index_args()],
         capture_output=True, text=True,
     ).stdout
     m = re.search(r"Available versions: (.*)", out)
     return [v.strip() for v in m.group(1).split(",")] if m else []
+
+
+def check_available(spec: CodeSpec | str, *, core_dir: Path | str | None = None) -> None:
+    """Raise ``ValueError``, listing what is available, if ``spec`` cannot be installed.
+
+    A release must be published for the Python running this (environments are
+    built with it); a commit must be in the core checkout.
+    """
+    spec = parse_code(spec) if isinstance(spec, str) else spec
+    if spec.kind == "commit":
+        try:
+            resolve_commit(_core_dir(core_dir), spec.ref)
+        except FileNotFoundError as e:
+            raise ValueError(str(e)) from None
+        except subprocess.CalledProcessError as e:
+            raise ValueError(f"cannot look up commit {spec.ref!r}: {e}") from None
+        return
+    package = _PACKAGES[spec.name]
+    where = "the wheels index" if spec.name == "openmc" else "PyPI"
+    available = available_versions(spec.name)
+    if not available:
+        raise ValueError(
+            f"cannot list the {package} versions on {where} for Python "
+            f"{sys.version_info.major}.{sys.version_info.minor} (offline, or no wheel for this Python); "
+            "environments use the Python that runs the command"
+        )
+    if spec.ref not in available:
+        raise ValueError(f"{package} {spec.ref} is not on {where}; available: {available}")
+
+
+def _ready_file(spec: CodeSpec, core_dir) -> Path | None:
+    if spec.kind == "commit":
+        try:
+            commit = resolve_commit(_core_dir(core_dir), spec.ref)
+        except (FileNotFoundError, ValueError, subprocess.CalledProcessError):
+            return None
+        return env_dir(spec, commit) / _READY
+    return env_dir(spec) / _READY
+
+
+def is_ready(spec: CodeSpec | str, *, core_dir: Path | str | None = None) -> bool:
+    """Whether the environment for ``spec`` is built and checked (never builds one)."""
+    spec = parse_code(spec) if isinstance(spec, str) else spec
+    ready = _ready_file(spec, core_dir)
+    return ready is not None and ready.exists()
+
+
+def ready_identity(spec: CodeSpec | str, *, core_dir: Path | str | None = None) -> dict | None:
+    """What the ready environment for ``spec`` was checked to hold, or ``None`` if not built."""
+    spec = parse_code(spec) if isinstance(spec, str) else spec
+    ready = _ready_file(spec, core_dir)
+    return json.loads(ready.read_text()) if ready is not None and ready.exists() else None
 
 
 def _build_yamc_wheel(core_dir: Path, commit: str, env: Path, work: Path) -> Path:
@@ -213,10 +270,8 @@ def ensure(spec: CodeSpec | str, *, core_dir: Path | str | None = None, rebuild:
     env = env_dir(spec, commit)
     if (env / _READY).exists() and not rebuild:
         return env
-    if spec.name == "openmc":
-        available = _available_openmc_versions()
-        if available and spec.ref not in available:
-            raise ValueError(f"openmc {spec.ref} is not on the wheels index; available: {available}")
+    if spec.kind == "release":
+        check_available(spec)
 
     shutil.rmtree(env, ignore_errors=True)
     env.parent.mkdir(parents=True, exist_ok=True)

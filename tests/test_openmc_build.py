@@ -10,13 +10,11 @@ no OpenMC.
 """
 import os
 import stat
-import sys
-import types
 
 import pytest
 
 import cache_utils
-from cache_utils import find_record, save_cached
+from cache_utils import find_cached, save_cached
 from yamc_verify import tasks
 
 BUILD = "0.16.1-dev7+g0123abc"
@@ -50,25 +48,23 @@ def test_a_missing_openmc_is_an_error_only_when_its_identity_is_needed(tmp_path,
     old = {"name": "openmc", "build_id": "unknown"}
     save_cached(tmp_path, "endf-b8.1", "openmc", "Fe", {"x": 1.0}, settings={"a": 1}, identity=old)
     # A yamc-only run reads the reference without asking which OpenMC made it.
-    assert find_record(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}) is not None
+    assert find_cached(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}) is not None
     with pytest.raises(FileNotFoundError, match="openmc"):
-        find_record(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}, build_keyed=True)
+        find_cached(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}, build_keyed=True)
 
 
 def test_a_build_keyed_reference_from_another_build_reruns(openmc_on_path, tmp_path):
     other = {"name": "openmc", "build_id": "0.15.0+gfffffff"}
     save_cached(tmp_path, "endf-b8.1", "openmc", "Fe", {"x": 1.0}, settings={"a": 1}, identity=other)
-    assert find_record(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}, build_keyed=True) is None
+    assert find_cached(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}, build_keyed=True) is None
     # Not build-keyed, the other build's reference is used.
-    assert find_record(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}) is not None
+    assert find_cached(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}) is not None
     save_cached(tmp_path, "endf-b8.1", "openmc", "Fe", {"x": 2.0}, settings={"a": 1})
-    path, record = find_record(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}, build_keyed=True)
+    path, record = find_cached(tmp_path, "endf-b8.1", "openmc", "Fe", settings={"a": 1}, build_keyed=True)
     assert path.name == f"{BUILD}.json" and record["results"] == {"x": 2.0}
 
 
-def test_the_planner_keys_exactly_those_families_while_openmc_runs(monkeypatch):
-    # The planner imports yamc at module level; a stand-in is enough here.
-    monkeypatch.setitem(sys.modules, "yamc", sys.modules.get("yamc") or types.ModuleType("yamc"))
+def test_the_planner_keys_exactly_those_families_while_openmc_runs():
     from yamc_verify import plan
     from yamc_verify.backends import resolve
 

@@ -24,11 +24,21 @@ class Backends:
         Whether ``openmc-cpu`` was requested.
     computes : list[str]
         The yamc compute suffixes requested, e.g. ``["cpu", "gpu"]``.
+    discover_with_openmc : bool
+        Whether the items come from the OpenMC library (as when OpenMC runs)
+        rather than yamc's data cache. True whenever OpenMC runs; also set for
+        a yamc-only process that is part of a verification with OpenMC, so both
+        codes run the same items.
     """
 
     tokens: list[str]
     run_openmc: bool
     computes: list[str]
+    discover_with_openmc: bool = False
+
+    def __post_init__(self):
+        if self.run_openmc and not self.discover_with_openmc:
+            object.__setattr__(self, "discover_with_openmc", True)
 
     @property
     def codes(self) -> list[str]:

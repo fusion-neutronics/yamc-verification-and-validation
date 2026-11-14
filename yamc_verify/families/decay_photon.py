@@ -588,7 +588,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     timesteps = task.extras["timesteps"]
     phases = task.extras["phases"]
 
-    nuclides = discover(task, b.run_openmc)
+    nuclides = discover(task, b.discover_with_openmc)
     print(f"Running D1S simulations for {len(nuclides)} nuclides...")
     for nuc, _, elem, _ in nuclides:
         print(f"  {nuc} ({elem})")

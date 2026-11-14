@@ -284,7 +284,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
 
     b = backends if backends is not None else resolve()
     openmc_meta, yamc_meta = _metas(task)
-    layers = discover(task, b.run_openmc)
+    layers = discover(task, b.discover_with_openmc)
     print(f"Running multimaterial-slab neutron model for {len(layers)} layers: {layers}")
 
     memo: dict = {}  # code -> {layer_name: result_dict}

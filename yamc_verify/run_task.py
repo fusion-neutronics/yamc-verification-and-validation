@@ -1,22 +1,29 @@
 """Run one verification task's simulations (drive + cache), without a notebook.
 
-This replaces the per-task driver notebooks. The orchestrator launches
+The runners (``vv run`` through :mod:`yamc_verify.project`, and the
+in-place :mod:`yamc_verify.orchestrator`) launch
 ``python -m yamc_verify.run_task <task-key>`` as a subprocess (with
-``YAMC_VERIFY_PROGRESS`` set), which resolves the task and backends and calls the
-family's ``run_all`` directly: it discovers the items, runs each enabled backend,
-caches the results on disk, and emits the same progress events the live dashboard
-tails. Honors the same selection env vars as before (``MC_BACKENDS``,
+``VV_PROGRESS`` set), which resolves the task and backends and calls the
+family's ``run_all`` directly: it discovers the items, runs each enabled
+backend, caches the results on disk, and emits the progress events the live
+display tails. Honors the selection env vars (``MC_BACKENDS``,
 ``YAMC_VERIFY_NUCLIDES``, ``YAMC_VERIFY_ELEMENTS``,
 ``YAMC_VERIFY_NUMBER_OF_SIMULATIONS``).
+
+``--discover-with-openmc`` takes the items from the OpenMC library even when
+OpenMC does not run in this process, so a yamc process that is part of a
+verification with OpenMC runs the same items as the OpenMC one.
 
 Usage::
 
     python -m yamc_verify.run_task neutron/sphere/endf-b8.1
+    MC_BACKENDS=yamc-cpu python -m yamc_verify.run_task neutron/sphere/endf-b8.1 --discover-with-openmc
 """
 from __future__ import annotations
 
+import argparse
+import dataclasses
 import os
-import sys
 
 from . import backends as _backends
 from . import tasks as _tasks
@@ -57,12 +64,17 @@ def run_task(task, backends=None):
 
 
 def main(argv=None):
-    argv = list(argv if argv is not None else sys.argv[1:])
-    if len(argv) != 1:
-        print("usage: python -m yamc_verify.run_task <task-key>", file=sys.stderr)
-        return 2
-    task = _tasks.get_task(argv[0])
-    run_task(task)
+    """Run one task from the command line; return the exit status."""
+    ap = argparse.ArgumentParser(prog="python -m yamc_verify.run_task", description=__doc__.split("\n\n")[0])
+    ap.add_argument("task", help="task key, e.g. neutron/sphere/endf-b8.1")
+    ap.add_argument("--discover-with-openmc", action="store_true",
+                    help="take the items from the OpenMC library even if OpenMC does not run here")
+    args = ap.parse_args(argv)
+    task = _tasks.get_task(args.task)
+    b = _backends.resolve()
+    if args.discover_with_openmc:
+        b = dataclasses.replace(b, discover_with_openmc=True)
+    run_task(task, b)
     return 0
 
 

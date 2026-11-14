@@ -1,4 +1,6 @@
 --extra-index-url https://shimwell.github.io/wheels
+# The shared vv package (records, plans, the vv command) from this checkout.
+-e ./packages/vv
 numpy
 pandas
 plotly>=5.0.0
