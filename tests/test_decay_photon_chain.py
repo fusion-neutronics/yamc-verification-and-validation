@@ -13,7 +13,7 @@ import types
 import pytest
 
 from cache_utils import load_cached, save_cached
-from yamc_verify import tasks
+from yamc_verify import expected, tasks
 from yamc_verify.families import decay_photon
 
 # A stand-in build: these tests are about the settings, not the code identity.
@@ -34,7 +34,7 @@ class _Part:
     def __and__(self, other):
         return self
 
-    def read_nuclear_data(self, library):
+    def read_nuclear_data(self, library, photon_data=None):
         pass
 
 
@@ -96,6 +96,31 @@ def test_yamc_reads_the_full_chain_through_the_whole_run(fake_yamc, key):
     # Unset again afterwards, so nothing leaks into the next run.
     assert tuple(getattr(fake_yamc, name) for name in SETTINGS) == (None,) * 3
     assert result["radionuclides"] == ["Mn56", "Mn54"]
+
+
+def test_direct_only_keeps_the_direct_production_paths(fake_yamc):
+    """yamc names an emitter made through a parent by its decay path. OpenMC's
+    list of direct activation products holds plain names, so restricting to it
+    keeps only the emitters a reaction makes directly, which are the photons
+    OpenMC counts."""
+    fake_yamc.Model.radionuclides = lambda self: ["Co60", "Fe60>Co60m", "Mn54", "Mn56"]
+    task = tasks.get_task(D1S_TASKS[0])
+    result, _ = decay_photon.run_yamc_d1s("Fe56", None, "Fe", None, task,
+                                          parent_nuclides=["Co60", "Co60m", "Mn56"])
+
+    assert result["radionuclides"] == ["Co60", "Mn56"]
+    assert result["full_chain_radionuclides"] == 4
+    assert result["direct_products_only"]
+
+
+def test_a_decay_path_tag_takes_its_emitters_lines(monkeypatch):
+    monkeypatch.setattr(expected, "_decay_gamma_lines",
+                        lambda: {"Ba137m": [661.657e3], "Co60": [1.173e6, 1.332e6]})
+    edges = [1.0e5, 1.0e6, 2.0e6]
+
+    assert expected.decay_gamma_bins(["Cs137>Ba137m"], edges) == {0}
+    assert expected.decay_gamma_bins(["Co60"], edges) == {1}
+    assert expected.decay_gamma_bins(["Cs137"], edges) == set()
 
 
 @pytest.mark.parametrize("key", D1S_TASKS)

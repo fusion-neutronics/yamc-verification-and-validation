@@ -275,7 +275,10 @@ def run_yamc_simulation(nuclide, neutron_path, element, photon_path, task: Task,
         temperature=294,
         id=1,
     )
-    material.read_nuclear_data(task.library)
+    # Photon data are selected apart from neutron data, with no default: take
+    # the element's from the task library, as OpenMC reads that library's own
+    # photon files.
+    material.read_nuclear_data(task.library, photon_data={element: task.library})
 
     cell = mc.Cell(id=1, name=task.geometry, region=region, material=material)
     geometry = mc.Geometry([cell])

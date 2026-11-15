@@ -9,7 +9,7 @@ Monte Carlo code, OpenMC.
 pip install -r requirements.txt
 ```
 
-This installs the public `yamc` package, 0.20.0 or newer, from PyPI. It brings
+This installs the public `yamc` package, 0.24.0 or newer, from PyPI. It brings
 in the matching `yamc-core` wheel. It also installs the shared `vv` package from
 `packages/vv/` (editable), which provides the `vv` command. Run it from the
 repository root, since the requirements name `packages/vv` by a relative path.
@@ -68,9 +68,9 @@ None of them has a default:
 
 ```bash
 vv plan --models neutron/sphere photon/sphere --libraries endf-b8.1 \
-        --codes openmc==0.16.1.dev0 yamc-cpu==0.23.0
+        --codes openmc==0.16.1.dev0 yamc-cpu==0.24.0
 vv run  --models neutron/sphere photon/sphere --libraries endf-b8.1 \
-        --codes openmc==0.16.1.dev0 yamc-cpu==0.23.0
+        --codes openmc==0.16.1.dev0 yamc-cpu==0.24.0
 ```
 
 The same from Python:
@@ -79,9 +79,9 @@ The same from Python:
 from yamc_verify import verification, verification_plan
 
 print(verification_plan(models=["neutron/sphere"], libraries=["endf-b8.1"],
-                        codes=["openmc==0.16.1.dev0", "yamc-cpu==0.23.0"]).format())
+                        codes=["openmc==0.16.1.dev0", "yamc-cpu==0.24.0"]).format())
 result = verification(models=["neutron/sphere"], libraries=["endf-b8.1"],
-                      codes=["openmc==0.16.1.dev0", "yamc-cpu==0.23.0"])
+                      codes=["openmc==0.16.1.dev0", "yamc-cpu==0.24.0"])
 assert result.ok, result.failures
 ```
 
@@ -110,13 +110,13 @@ build), plus building the environments that are not ready yet:
 ```text
 codes:
     openmc==0.16.1.dev0  environment ready
-    yamc-cpu==0.23.0     environment to build (about 5 mins)
+    yamc-cpu==0.24.0     environment to build (about 5 mins)
 
 40/80 cached, 0/40 completed ETA 2.1 hrs
 
 neutron/sphere endf-b8.1
     openmc==0.16.1.dev0 - 20/20 cached
-    yamc-cpu==0.23.0 - 20/20 todo
+    yamc-cpu==0.24.0 - 20/20 todo
 ...
 estimate: about 2.2 hrs, including building 1 environment(s)
 ```
@@ -151,15 +151,15 @@ Examples:
 ```bash
 # one isotope through one model with a yamc release and OpenMC
 YAMC_VERIFY_NUCLIDES=Fe56 vv run --models neutron/sphere --libraries endf-b8.1 \
-    --codes openmc==0.16.1.dev0 yamc-cpu==0.23.0
+    --codes openmc==0.16.1.dev0 yamc-cpu==0.24.0
 
 # every stable isotope/element, every endf-b8.1 model, on all three codes
 YAMC_VERIFY_NUMBER_OF_SIMULATIONS=-1 vv run --models all --libraries endf-b8.1 \
-    --codes openmc==0.16.1.dev0 yamc-cpu==0.23.0 yamc-gpu==0.23.0
+    --codes openmc==0.16.1.dev0 yamc-cpu==0.24.0 yamc-gpu==0.24.0
 
 # compare two yamc builds on the neutron sphere
 vv run --models neutron/sphere --libraries endf-b8.1 \
-    --codes yamc-cpu==0.23.0 yamc-cpu@86ef200e
+    --codes yamc-cpu==0.24.0 yamc-cpu@86ef200e
 ```
 
 `vv` finds this repository's project through `vv.toml` at its root, so it works

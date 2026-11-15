@@ -186,7 +186,7 @@ def main():
             expected = getattr(references, sim_type)(nuclide)
             if sim_type == "transmutation":
                 module.NEUTRON_DATA_DIR = "endf-b8.1"
-                yamc.cross_section_data = "endf-b8.1"
+                yamc.neutron_cross_section_data = "endf-b8.1"
                 actual = runner(nuclide, with_anything=False)
             else:
                 actual = runner(nuclide)
