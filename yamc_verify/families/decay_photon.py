@@ -135,13 +135,21 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
                  parent_nuclides=None):
     """Run YAMC D1S simulation. Returns (results_dict, model).
 
+    yamc names each decay-photon emitter by the decay path that makes it: an
+    emitter a reaction makes directly is its own name (``"Co60"``), one made
+    through a decaying parent is the path (``"Cs137>Ba137m"``), and each path
+    has its own time correction. The tally, the time correction and the
+    ``radionuclides`` this returns are all keyed by those tags.
+
     ``parent_nuclides`` restricts the decay-photon tally (and therefore the
-    time correction) to the emitters in the list. yamc follows every decay
-    chain from the activation products, so its default emitter set carries the
+    time correction) to the tags in the list. yamc follows every decay chain
+    from the activation products, so its default emitter set carries the
     daughters (Fr, At, Bi, Po, Pb, ... for the Ac isotopes); OpenMC's D1S
     time-corrects the direct activation products only and never emits a
-    daughter's photons. Passing OpenMC's radionuclide list here makes the two
-    codes answer the same question (fusion-neutronics/core#27); ``None`` keeps
+    daughter's photons. OpenMC's radionuclide list holds plain nuclide names,
+    which match yamc's direct-production tags only, so passing it here keeps
+    the photons OpenMC counts and drops the ones made through a parent: the two
+    codes answer the same question (fusion-neutronics/core#27). ``None`` keeps
     yamc's full-chain answer.
     """
     import yamc as mc
@@ -155,7 +163,10 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
         temperature=294,
         id=1,
     )
-    material.read_nuclear_data(task.library)
+    # Photon data are selected apart from neutron data, with no default: take
+    # the element's from the task library, as OpenMC reads that library's own
+    # photon files.
+    material.read_nuclear_data(task.library, photon_data={element: task.library})
 
     region = yamc_region(task.geometry, task.dims)
 
@@ -174,7 +185,8 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
     # product's daughters are followed to the end of their decay chains. The
     # settings are unset again on the way out.
     with discovery.transmutation_network(task.library):
-        # Unstable activation products reachable from this model's materials.
+        # Decay-path tags of the unstable activation products reachable from
+        # this model's materials.
         radionuclides = mc.Model(
             geometry=geometry, source=source, verbose=[],
         ).radionuclides()
@@ -184,8 +196,9 @@ def run_yamc_d1s(nuclide, neutron_path, element, photon_path, task: Task, comput
             missing = sorted(wanted - set(radionuclides))
             radionuclides = [r for r in radionuclides if r in wanted]
             print(f"    restricting yamc to the {len(radionuclides)} direct products "
-                  f"({full_chain_count} in the full chains)"
-                  + (f"; OpenMC lists {missing} which yamc does not produce" if missing else ""))
+                  f"({full_chain_count} decay paths in the full chains)"
+                  + (f"; OpenMC lists {missing} which yamc does not produce directly"
+                     if missing else ""))
 
         tally = mc.Tally(
             scores=['flux'],

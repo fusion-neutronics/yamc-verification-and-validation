@@ -50,9 +50,9 @@ class _Part:
 
 @pytest.mark.parametrize("key", [t.key for t in tasks.all_tasks() if t.family == "photon"])
 def test_yamc_photon_runs_read_photon_data_from_the_task_library(key, monkeypatch):
-    """yamc takes photon data from endf-b8.1 whatever the neutron library unless
-    told otherwise; OpenMC reads the task library's own photon files. A FENDL
-    photon task must give yamc FENDL's photon data too."""
+    """yamc selects photon data apart from neutron data, with no default;
+    OpenMC reads the task library's own photon files. A FENDL photon task must
+    give yamc FENDL's photon data too."""
     from yamc_verify.families import photon
 
     loads = []
@@ -84,3 +84,36 @@ def test_yamc_photon_runs_read_photon_data_from_the_task_library(key, monkeypatc
     task = tasks.get_task(key)
     photon.run_yamc_simulation("Ag", task)
     assert loads == [(task.library, {"Ag": task.library})]
+
+
+class _Loaded(Exception):
+    """Stops a runner once its material has read its data."""
+
+
+@pytest.mark.parametrize("key", [t.key for t in tasks.all_tasks()
+                                 if t.family in ("secondary-photon", "decay-photon")])
+def test_yamc_coupled_runs_select_photon_data_from_the_task_library(key, monkeypatch):
+    """The coupled and D1S runs transport photons, and yamc has no default
+    photon data (a keyword given for the neutrons does not select it), so they
+    must name the element's photon data from the task library or yamc refuses
+    to run."""
+    from yamc_verify.families import decay_photon, secondary_photon
+
+    loads = []
+
+    class Material(_Part):
+        def read_nuclear_data(self, source, photon_data=None):
+            loads.append((source, photon_data))
+            raise _Loaded
+
+    fake = types.SimpleNamespace(Material=Material,
+                                 sources=types.SimpleNamespace(Isotropic=_Part, Discrete=_Part))
+    for name in ("Sphere", "Cylinder", "Plane", "Cell", "Geometry", "NeutronSource"):
+        setattr(fake, name, _Part)
+    monkeypatch.setitem(sys.modules, "yamc", fake)
+
+    task = tasks.get_task(key)
+    family = decay_photon.run_yamc_d1s if task.family == "decay-photon" else secondary_photon.run_yamc_simulation
+    with pytest.raises(_Loaded):
+        family("Fe56", None, "Fe", None, task)
+    assert loads == [(task.library, {"Fe": task.library})]

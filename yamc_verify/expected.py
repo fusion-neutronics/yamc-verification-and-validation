@@ -92,14 +92,19 @@ def _decay_gamma_lines() -> dict[str, list[float]]:
 
 
 def decay_gamma_bins(radionuclides, energy_bins) -> set[int]:
-    """Bin indices containing a decay gamma line of any of ``radionuclides``."""
+    """Bin indices containing a decay gamma line of any of ``radionuclides``.
+
+    Each entry is a nuclide name or a yamc decay-path tag (``"Cs137>Ba137m"``);
+    a tag's lines are those of its emitter, the last nuclide on the path.
+    """
     table = _decay_gamma_lines()
     if not table or energy_bins is None or len(energy_bins) < 2:
         return set()
     edges = [float(e) for e in energy_bins]
     bins = set()
     for rn in radionuclides or []:
-        for e in table.get(rn, ()):  # unknown nuclide -> no lines -> nothing excluded
+        emitter = rn.rpartition(">")[2]
+        for e in table.get(emitter, ()):  # unknown nuclide -> no lines -> nothing excluded
             idx = _bin_index(edges, e)
             if idx is not None:
                 bins.add(idx)
