@@ -422,7 +422,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
 
     b = backends if backends is not None else resolve()
     openmc_meta, yamc_meta = _metas(task)
-    cells = discover(task, b.run_openmc)
+    cells = discover(task, b.discover_with_openmc)
     print(f"Running tokamak neutron model for {len(cells)} cells: {cells}")
 
     memo: dict = {}  # code -> {cell_name: result_dict}

@@ -26,9 +26,9 @@ jobs:
 
       # The site is the single standalone web/benchmarks.html page; the only
       # build step is generating the index JSON it reads. index_builder needs
-      # just these three.
+      # just these three and the shared vv package (the record format).
       - name: Install build deps
-        run: pip install numpy pandas plotly
+        run: pip install numpy pandas plotly ./packages/vv
 
       # benchmarks.html is the landing page (served as index.html at the root),
       # uses only relative paths, and inlines its own CSS, so there is no MyST /

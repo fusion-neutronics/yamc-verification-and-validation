@@ -1,29 +1,27 @@
-"""Live, in-place terminal dashboard for the verification orchestrator.
+"""Live, in-place terminal display of a verification run.
 
-The orchestrator maintains a *raw* state (counts, timestamps, observed run
-times) and calls :func:`render_lines` / :class:`LiveDisplay` with the current
-monotonic clock; all derived values (elapsed, ETA) are computed here so the
-state stays simple. The layout mirrors issue #29::
+The runner (:mod:`vv.runner`) maintains a *raw* state (counts, timestamps,
+observed run times) and calls :func:`render_lines` / :class:`LiveDisplay` with
+the current monotonic clock; all derived values (elapsed, ETA) are computed here
+so the state stays simple. The layout::
 
-    running with YAMC 0.4.0, built 3 mins ago
+    codes: code-a==1.2.0, code-b==0.4.0
     120/300 cached, 80/180 completed ETA 30 mins
-    neutron sphere - completed 15 mins
-        yamc-cpu - 50/50 completed 10 mins
-        yamc-gpu - 20/50 cached 30/50 completed 5 mins
-        openmc - 50/50 cached
-    photon sphere
-        yamc-cpu - 30/50 running Fe ETA 9 mins  <--- in progress
-        yamc-gpu - 50/50 todo
-        openmc - 50/50 cached
+    sphere endf-b8.1 - completed 15 mins
+        code-a==1.2.0 - 50/50 completed 10 mins
+        code-b==0.4.0 - 50/50 cached
+    slab endf-b8.1
+        code-a==1.2.0 - 30/50 running Fe ETA 9 mins  <--- in progress
+        code-b==0.4.0 - 50/50 cached
 
 Raw state schema::
 
     {
-      "yamc_version": str, "yamc_built_ago": float | None,
+      "header": [str, ...],
       "tasks": [{
         "label": str, "status": "queued"|"running"|"done",
         "t_start": float | None, "t_end": float | None,
-        "codes": {code: {
+        "codes": {row name: {
           "total": int, "cached": int, "computed": int,
           "running_key": str | None, "status": "queued"|"running"|"done",
           "t_start": float | None, "t_end": float | None,
@@ -38,6 +36,7 @@ import sys
 
 
 def humanize(seconds) -> str:
+    """A rough, human-readable duration such as ``"12 mins"`` (``"?"`` for ``None``)."""
     if seconds is None:
         return "?"
     s = float(seconds)
@@ -136,26 +135,39 @@ def _task_header(t, now):
     return f"{label} - completed {humanize(el)}"
 
 
+def remaining_seconds(state) -> tuple[float, int]:
+    """Estimated seconds left, and how many unfinished rows have no time to go on.
+
+    Each row's average comes from the times observed in this run, else the
+    times recorded by earlier runs (``seed_avg``), else the average over every
+    row.
+    """
+    global_avg = _global_avg(state)
+    total, unknown = 0.0, 0
+    for t in state["tasks"]:
+        for c in t["codes"].values():
+            if c["status"] == "done":
+                continue
+            e = _code_eta(c, global_avg)
+            if e is None:
+                unknown += 1
+            else:
+                total += e
+    return total, unknown
+
+
 def render_lines(state, now: float) -> list[str]:
     """Render the dashboard to a list of plain-text lines."""
-    lines = []
-    v = state.get("yamc_version", "?")
-    ago = state.get("yamc_built_ago")
-    lines.append(f"running with YAMC {v}, built {humanize(ago)} ago" if ago is not None
-                 else f"running with YAMC {v}")
+    lines = list(state.get("header", []))
 
     global_avg = _global_avg(state)
     tot = cached = computed = 0
-    eta_total = 0.0
     for t in state["tasks"]:
         for c in t["codes"].values():
             tot += c["total"]
             cached += c["cached"]
             computed += c["computed"]
-            if c["status"] != "done":
-                e = _code_eta(c, global_avg)
-                if e:
-                    eta_total += e
+    eta_total, _ = remaining_seconds(state)
     to_compute = max(0, tot - cached)
     eta_str = f" ETA {humanize(eta_total)}" if eta_total > 0 else ""
     lines.append(f"{cached}/{tot} cached, {computed}/{to_compute} completed{eta_str}")
@@ -177,6 +189,7 @@ class LiveDisplay:
         self._prev = 0
 
     def update(self, state, now: float) -> None:
+        """Draw ``state`` as of the monotonic time ``now``."""
         lines = render_lines(state, now)
         out = self.stream
         if self._tty:

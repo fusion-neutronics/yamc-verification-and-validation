@@ -488,7 +488,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
 
     b = backends if backends is not None else resolve()
     openmc_meta, yamc_meta = _metas(task)
-    elements = discover(task, b.run_openmc)
+    elements = discover(task, b.discover_with_openmc)
     print(f"Running photon simulations for {len(elements)} elements: {elements}")
 
     all_results = {}

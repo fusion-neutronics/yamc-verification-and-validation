@@ -468,7 +468,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
 
     b = backends if backends is not None else resolve()
     openmc_meta, yamc_meta = _metas(task)
-    nuclides = discover(task, b.run_openmc)
+    nuclides = discover(task, b.discover_with_openmc)
     print(f"Running simulations for {len(nuclides)} nuclides: {nuclides}")
 
     all_results = {}

@@ -10,9 +10,11 @@ pip install -r requirements.txt
 ```
 
 This installs the public `yamc` package, 0.20.0 or newer, from PyPI. It brings
-in the matching `yamc-core` wheel. To verify yamc changes that are not released
-yet, build the core into the same environment instead (see
-[Using the latest yamc](#using-the-latest-yamc)).
+in the matching `yamc-core` wheel. It also installs the shared `vv` package from
+`packages/vv/` (editable), which provides the `vv` command. Run it from the
+repository root, since the requirements name `packages/vv` by a relative path.
+To verify yamc changes that are not released yet, build the core into the same
+environment instead (see [Using the latest yamc](#using-the-latest-yamc)).
 
 ## Core Validation Before a Release
 
@@ -60,106 +62,176 @@ retains the artifacts for 30 days, including results from failed comparisons.
 
 ## Running the verification models
 
-`run_models.sh` runs the verification tasks and populates the on-disk results
-cache. It drives them through the `yamc_verify` orchestrator
-(`python -m yamc_verify.orchestrator`), which runs each task silently
-(`python -m yamc_verify.run_task` as a subprocess, output captured) and renders
-a single **live, in-place dashboard** instead of a large scrolling log:
+`vv plan` shows what a verification would run, and `vv run` runs it. Name the
+models, the libraries and the codes, each code with an exact version or commit.
+None of them has a default:
 
-```text
-running with YAMC 0.4.0, built 3 mins ago
-120/300 cached, 80/180 completed ETA 30 mins
-neutron sphere - completed 15 mins
-    yamc-cpu - 50/50 completed 10 mins
-    yamc-gpu - 20/50 cached 30/50 completed 5 mins
-    openmc - 50/50 cached
-photon sphere
-    yamc-cpu - 30/50 ETA 9 mins  <--- in progress
-    yamc-gpu - 50/50 todo
-    openmc - 50/50 cached
+```bash
+vv plan --models neutron/sphere photon/sphere --libraries endf-b8.1 \
+        --codes openmc==0.16.1.dev0 yamc-cpu==0.23.0
+vv run  --models neutron/sphere photon/sphere --libraries endf-b8.1 \
+        --codes openmc==0.16.1.dev0 yamc-cpu==0.23.0
 ```
 
-The full plan (every task, code, and cached/to-do split) is computed up front
-by inspecting the cache, and the counts + ETA update live as each item
-finishes. Environment variables control it:
+The same from Python:
 
-- `MC_BACKENDS` - comma-separated list of `openmc-cpu`, `yamc-cpu`, `yamc-gpu`. Required: there is no default, and the run stops with an error if it is unset.
+```python
+from yamc_verify import verification, verification_plan
+
+print(verification_plan(models=["neutron/sphere"], libraries=["endf-b8.1"],
+                        codes=["openmc==0.16.1.dev0", "yamc-cpu==0.23.0"]).format())
+result = verification(models=["neutron/sphere"], libraries=["endf-b8.1"],
+                      codes=["openmc==0.16.1.dev0", "yamc-cpu==0.23.0"])
+assert result.ok, result.failures
+```
+
+- **Models** are task keys without their library (`neutron/sphere`,
+  `secondary-photon/broomstick`, ...), or `all` for every model defined on the
+  libraries. A pair that is not defined (the tokamak has no FENDL task, say) is
+  listed as not run.
+- **Libraries** must have their OpenMC data where `NUCLEAR_DATA_DIR` in
+  `yamc_verify/tasks.py` says (a `cross_sections.xml`).
+- **Codes** are `openmc==<version>`, `yamc-cpu==<version>`,
+  `yamc-gpu==<version>`, `yamc-cpu@<commit>` or `yamc-gpu@<commit>`. Each code
+  version runs in its own environment (see
+  [One environment per code version](#one-environment-per-code-version)), built
+  the first time it is needed and reused after that; the CPU and GPU runs of one
+  yamc version share one. Two yamc builds can be compared in one call.
+
+An unknown or missing model, library or code stops it before anything runs,
+with a list of what is available.
+
+`vv plan` builds nothing and runs nothing. It lists each code and whether its
+environment is ready, then every model, library and code with how many items
+already have a record that code would accept and how many are still to run, and
+a rough time. The time comes from how long the earlier records took (from any
+build), plus building the environments that are not ready yet:
+
+```text
+codes:
+    openmc==0.16.1.dev0  environment ready
+    yamc-cpu==0.23.0     environment to build (about 5 mins)
+
+40/80 cached, 0/40 completed ETA 2.1 hrs
+
+neutron/sphere endf-b8.1
+    openmc==0.16.1.dev0 - 20/20 cached
+    yamc-cpu==0.23.0 - 20/20 todo
+...
+estimate: about 2.2 hrs, including building 1 environment(s)
+```
+
+`vv run` builds the environments that are not ready, then runs each model,
+library and code as a separate process inside that code's environment, with the
+same layout as a live, in-place display. Its output goes to a log per job, named
+at the end if a job fails. Records are written as described in
+[Results cache](#results-cache).
+
+Which items run is chosen by environment variables, as before:
+
 - `YAMC_VERIFY_NUCLIDES` - comma-separated list naming the exact isotope(s) to run
   on the nuclide-based models (neutron, secondary-photon, decay-photon, transmutation),
   e.g. `Fe56`. Overrides the count cap.
 - `YAMC_VERIFY_ELEMENTS` - comma-separated list naming the exact element(s) to run on
   the photon models, e.g. `Fe`. Overrides the count cap.
 - `YAMC_VERIFY_NUMBER_OF_SIMULATIONS` - cap on nuclides/elements per model when no
-  explicit list is given (default: `3`). Special values:
+  explicit list is given (unset or `0`: no cap). Special values:
   - `0` - no cap: run **every** discovered nuclide/element (includes radioactive ones).
   - `-1` - run every **stable** (non-radioactive) nuclide, and for the photon
     (element) models every element that has a stable isotope. Stability comes from
     the depletion chain. The already physics-restricted models (decay-photon D1S
     parents, transmutation stable seeds) are unaffected.
 
+When OpenMC is one of the codes, the items come from its library for every code,
+so yamc and OpenMC run the same items; otherwise yamc's items come from its own
+data cache.
+
 Examples:
 
 ```bash
-# OpenMC only, 3 nuclides/elements per model (builds the reference cache)
-MC_BACKENDS=openmc-cpu ./run_models.sh
+# one isotope through one model with a yamc release and OpenMC
+YAMC_VERIFY_NUCLIDES=Fe56 vv run --models neutron/sphere --libraries endf-b8.1 \
+    --codes openmc==0.16.1.dev0 yamc-cpu==0.23.0
 
-# yamc + OpenMC, 3 each (this is what fills the comparison plots)
-MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
+# every stable isotope/element, every endf-b8.1 model, on all three codes
+YAMC_VERIFY_NUMBER_OF_SIMULATIONS=-1 vv run --models all --libraries endf-b8.1 \
+    --codes openmc==0.16.1.dev0 yamc-cpu==0.23.0 yamc-gpu==0.23.0
 
-# yamc + OpenMC, 10 nuclides/elements per model
-YAMC_VERIFY_NUMBER_OF_SIMULATIONS=10 MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
-
-# EVERYTHING: every stable isotope/element, every model, on all three codes
-# (OpenMC CPU + YAMC CPU + YAMC GPU). `=-1` keeps only stable, non-radioactive
-# nuclides (and elements with a stable isotope); no task argument means all
-# endf-b8.1 models. This is the full verification sweep - expect it to take a
-# long time and rely heavily on the cache.
-YAMC_VERIFY_NUMBER_OF_SIMULATIONS=-1 \
-  MC_BACKENDS=openmc-cpu,yamc-cpu,yamc-gpu ./run_models.sh
-
-# Same, but every isotope including radioactive ones (`=0` removes the cap).
-YAMC_VERIFY_NUMBER_OF_SIMULATIONS=0 \
-  MC_BACKENDS=openmc-cpu,yamc-cpu,yamc-gpu ./run_models.sh
-
-# one specific isotope/element through every model on all three codes
-YAMC_VERIFY_NUCLIDES=Fe56 YAMC_VERIFY_ELEMENTS=Fe \
-  MC_BACKENDS=openmc-cpu,yamc-cpu,yamc-gpu ./run_models.sh
-
-# a single model (task key)
-MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh transmutation/material-reaction-rate/endf-b8.1
+# compare two yamc builds on the neutron sphere
+vv run --models neutron/sphere --libraries endf-b8.1 \
+    --codes yamc-cpu==0.23.0 yamc-cpu@86ef200e
 ```
 
-The runs only write to the on-disk cache (the database the benchmark page reads);
-there are no notebooks to clean up afterwards.
+`vv` finds this repository's project through `vv.toml` at its root, so it works
+from any folder inside the repository.
 
-You can also run the orchestrator directly (this is what `run_models.sh` calls),
-or a single task without the dashboard:
+### Running with the codes installed here
+
+`run_models.sh` runs the tasks with whatever OpenMC and yamc are installed in the
+current environment, for example a core build with uncommitted changes (see
+[Using the latest yamc](#using-the-latest-yamc)). It uses the same live display,
+the same item variables and `MC_BACKENDS` (a comma-separated list of
+`openmc-cpu`, `yamc-cpu`, `yamc-gpu`; required, with no default). Arguments are
+task keys; with none it runs every endf-b8.1 task:
 
 ```bash
-python -m yamc_verify.orchestrator                          # all endf-b8.1 tasks
-python -m yamc_verify.orchestrator neutron/sphere/endf-b8.1
-python -m yamc_verify.run_task neutron/sphere/endf-b8.1     # one task, no dashboard
+MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh
+MC_BACKENDS=openmc-cpu,yamc-cpu ./run_models.sh transmutation/material-reaction-rate/endf-b8.1
+python -m yamc_verify.orchestrator neutron/sphere/endf-b8.1  # what run_models.sh calls
+python -m yamc_verify.run_task neutron/sphere/endf-b8.1      # one task, no display
 ```
+
+The runs only write to the on-disk cache (the database the benchmark page reads).
 
 ## Shared code (`yamc_verify/`)
 
 All the model logic lives in the `yamc_verify/` package. Runs are driven directly
 from it (there are no notebooks):
 
-- `tasks.py` — the task registry (one `Task` per model/geometry/library: library,
+- `tasks.py`: the task registry (one `Task` per model/geometry/library: library,
   geometry, particle statistics, which codes run, whether YAMC is cached). Single
   source of truth shared by `run_task` and the orchestrator.
-- `families/` — per-physics-family simulation runners, plotting, and metrics
+- `families/`: per-physics-family simulation runners, plotting, and metrics
   (`neutron`, `photon`, `secondary_photon`, `decay_photon`, `transmutation`),
   each exposing `run_all(task, backends, cache_dir=...)`. YAMC runs with
   `verbose=[]` and OpenMC with `verbosity=1` + `output=False`, so runs are silent.
-- `run_task.py` — drives one task: dispatches `task.family` to its family module's
-  `run_all` and caches the results. This is what the orchestrator runs per task.
-- `geometry.py`, `discovery.py`, `plotting.py` — shared geometry builders, item
+- `run_task.py`: drives one task: dispatches `task.family` to its family module's
+  `run_all` and caches the results. This is what each run process executes.
+- `geometry.py`, `discovery.py`, `plotting.py`: shared geometry builders, item
   discovery, and generic spectrum-comparison plotting/metrics.
-- `progress.py`, `plan.py`, `dashboard.py`, `orchestrator.py` — the live
-  dashboard: a progress side-channel, the up-front plan, rendering, and the runner.
+- `project.py`: `verification()` and the project `vv plan` / `vv run` use:
+  the models, libraries and code names, which records count as done, and how a
+  task runs in a code's environment.
+- `plan.py`: item discovery and record counting per task, for both runners.
+- `orchestrator.py`: the in-place runner behind `run_models.sh`.
 - `index_builder.py`: builds the `benchmarks-index.json` the web page reads.
+- `environments.py`: one Python environment per code version (`openmc==X`,
+  `yamc==X`, `yamc@<commit>`); see [One environment per code version](#one-environment-per-code-version).
+
+`cache_utils.py` (at the root) holds which records the yamc and OpenMC runs
+accept and the code identity each stores.
+
+## Shared package (`packages/vv/`)
+
+Code that does not name a particular code lives in the `vv` package, in its own
+folder with its own `pyproject.toml`, so that yani-verification-and-validation
+can install it from a git tag of this repository:
+
+```bash
+pip install "vv @ git+https://github.com/fusion-neutronics/yamc-verification-and-validation@<tag>#subdirectory=packages/vv"
+```
+
+- `vv.records`: the result record format (see [Results cache](#results-cache)).
+- `vv.runner`: checking a request, planning it and running it, each code in its
+  own environment, through a `vv.Project` the repository supplies (here
+  `yamc_verify.project.PROJECT`). A code is a name plus the recipe for its
+  environment (`vv.Code`).
+- `vv.progress`, `vv.dashboard`: the progress events a run emits (to the file
+  named by `VV_PROGRESS`) and the live display that follows them.
+- `vv.cli`: the `vv plan` and `vv run` commands, which find the project through
+  the nearest `vv.toml`.
+
+Its tests are in `packages/vv/tests/`.
 
 Running one task in code is roughly:
 
@@ -174,8 +246,9 @@ run_task(get_task("neutron/sphere/endf-b8.1"), backends.resolve("openmc-cpu,yamc
 1. Add the library path to `NUCLEAR_DATA_DIR` in `yamc_verify/tasks.py`.
 2. Register a `Task` for each model/geometry using the new library (copy an
    existing entry and change `library`/`particles`).
-3. Run it (`./run_models.sh <task-key>`); the index builder and the benchmark
-   database page pick up the new library automatically (library is a facet).
+3. Run it (`vv run --models <model> --libraries <library> --codes ...`); the
+   index builder and the benchmark database page pick up the new library
+   automatically (library is a facet).
 
 ## Adding a model
 
@@ -183,12 +256,13 @@ run_task(get_task("neutron/sphere/endf-b8.1"), backends.resolve("openmc-cpu,yamc
    a `run_all(task, backends, cache_dir=...)` like the others.
 2. Register `Task`s for it in `yamc_verify/tasks.py`, and map the new
    `task.family` to the module in `yamc_verify/run_task.py`.
-3. Run it with `./run_models.sh <task-key>`; results land in the task's cache and
-   appear in the benchmark database page.
+3. Run it with `vv run --models <model> --libraries <library> --codes ...`;
+   results land in the task's cache and appear in the benchmark database page.
 
 ## Results cache
 
-Every simulation result is a self-describing JSON record (via `cache_utils.py`) at
+Every simulation result is a self-describing JSON record (the format is
+`vv.records`; `cache_utils.py` decides which records a run accepts) at
 `tasks/<model>/<...>/cache/<library>/<code>/<item>/<build_id>.json`. A record
 holds the code that produced it (name, version, git commit, whether the build had
 uncommitted changes, backend), the run settings and their hash, when and where it
@@ -257,6 +331,32 @@ pip install -e ../core/packages/yamc-core
 The build replaces the PyPI wheel, and its new extension hash re-keys the YAMC
 cache (see [Results cache](#results-cache)).
 
+## One environment per code version
+
+To compare builds, each code version can have its own environment, built once
+under `~/.cache/yamc-verification/envs/` and reused:
+
+```bash
+python -m yamc_verify.environments ensure openmc==0.16.1.dev0 yamc==0.21.0 yamc@86ef200e
+python -m yamc_verify.environments list
+```
+
+- `openmc==<version>` installs that OpenMC wheel from the wheels index named in
+  `requirements.txt`. Only versions published there can be installed; asking for
+  another lists the ones that are.
+- `yamc==<version>` installs that `yamc-core` release from PyPI.
+- `yamc@<commit>` builds `yamc-core` at that commit from a local core checkout
+  (`--core-dir`, else `$YAMC_CORE_ROOT`, else `../core`), in a temporary worktree
+  with its own Cargo target directory. The commit must include the build commit
+  record (`yamc.__commit__`), which is how the environment is checked.
+
+Every environment also has the verification dependencies and the other code at
+its latest release, which the tools use to find nuclear data. It is checked
+after it is built (the version, and for a commit that the build reports that
+commit with no uncommitted changes) and only then marked ready. Environments
+use the Python that runs the command, so an OpenMC wheel must exist for that
+Python version.
+
 ## The benchmark database page (the site)
 
 The deployed site is a single standalone page, `web/benchmarks.html`, served as
@@ -276,7 +376,7 @@ python -m yamc_verify.index_builder --out benchmarks-index.json
 ```
 
 CI (`.github/workflows/pages.yml`) is correspondingly minimal: it installs
-`numpy pandas plotly`, generates the index, copies `benchmarks.html` (as the root
+`numpy pandas plotly` and the shared `vv` package, generates the index, copies `benchmarks.html` (as the root
 `index.html`), `logo.png`, and `web/models/`, drops in the results cache, and
 publishes to GitHub Pages. Every push to `main` regenerates the index, so the
 published site always reflects the current cache. There is no MyST, Node, or
@@ -303,7 +403,7 @@ files, the **deployed** site shows this data only if that cache is committed too
 
 ### A task run fails
 
-Check the per-task log the orchestrator prints on failure. Common issues:
+Check the per-job log printed at the end of the run. Common issues:
 
 - Missing nuclear data files (correct the data path used).
 - OpenMC or YAMC not installed in the virtual environment.

@@ -28,8 +28,9 @@ import argparse
 from dataclasses import dataclass
 
 import numpy as np
+from vv.records import cached_items, decode, latest_record
 
-from cache_utils import _decode, cached_items, code_identity, latest_record
+from cache_utils import code_identity
 
 from . import tasks as _tasks
 from .plotting import calculate_spectral_agreement
@@ -95,8 +96,8 @@ def audit(tasks_list=None, *, current_only=False, raw=False):
                 stale = ymc_rec[1]["code_identity"]["build_id"] != current_build
                 if current_only and stale:
                     continue
-                omc = _decode(omc_rec[1]["results"])
-                ymc = _decode(ymc_rec[1]["results"])
+                omc = decode(omc_rec[1]["results"])
+                ymc = decode(ymc_rec[1]["results"])
                 if t.family.startswith("transmutation"):
                     row = _transmutation_row(t, key, backend, omc, ymc, stale)
                 else:

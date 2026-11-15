@@ -35,8 +35,9 @@ from collections import Counter
 from pathlib import Path
 
 import numpy as np
+from vv.records import decode, iter_records
 
-from cache_utils import _decode, code_identity, iter_records
+from cache_utils import code_identity
 
 from . import tasks as _tasks
 from .discovery import element_from_nuclide
@@ -347,7 +348,7 @@ def build_index(tasks_list=None, worst_n=15):
                     unreadable.append((lib_dir / code / key).relative_to(_REPO_ROOT).as_posix())
                     continue
                 path, record = newest
-                loaded[code] = (record["code_identity"], _decode(record.get("results") or {}))
+                loaded[code] = (record["code_identity"], decode(record.get("results") or {}))
                 paths[code] = path
             if not loaded:
                 continue

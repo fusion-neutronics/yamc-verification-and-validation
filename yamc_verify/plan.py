@@ -1,30 +1,35 @@
-"""Build the up-front execution plan for the orchestrator.
+"""What each verification task would run, and which results already have a record.
 
-For every task the planner discovers the item list (same discovery the thin
-notebooks use, so no drift) and classifies each ``(item, code)`` as already
-cached or still to-do by inspecting the on-disk cache. Cached-item wall times
-recorded in the result records (including records from a previous build)
-seed the ETA estimate. The plan is an *estimate*: the live ``cached``/``computed``
-events emitted while a notebook runs are authoritative and correct it.
+For a task the planner discovers the item list (the same discovery the family
+run loops use, so no drift) and, for each code label, counts the items that
+already have a record the run would accept. Wall times stored in the records
+(from any build) seed the time estimate. Both runners use it:
+:mod:`yamc_verify.project` (``vv plan`` / ``vv run``) and the in-place
+:mod:`yamc_verify.orchestrator`. The plan is an *estimate*: the live
+``cached``/``computed`` events emitted while a task runs are authoritative.
 """
 from __future__ import annotations
 
 import glob
 import os
 import time
+from typing import Callable, Sequence
 
-import yamc
-
-from cache_utils import code_identity, find_record, latest_record
+from vv import Row
+from vv.records import find_record, latest_record
 
 from . import discovery
 from .backends import Backends
 from .tasks import OPENMC_BUILD_KEYED_FAMILIES, Task
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def yamc_build_age() -> float | None:
-    """Seconds since the compiled yamc core (`_core*.so`) was built, or None."""
+    """Seconds since the installed compiled yamc core (`_core*.so`) was built, or None."""
     try:
+        import yamc
+
         pkg = os.path.dirname(yamc.__file__)
         sos = glob.glob(os.path.join(pkg, "**", "*.so"), recursive=True)
         if not sos:
@@ -46,16 +51,30 @@ def code_enabled(code: str, backends: Backends) -> bool:
     return False
 
 
-def discover_items(task: Task, run_openmc: bool) -> list[str]:
-    """Return the item-name list for ``task`` (empty if discovery is unavailable)."""
+def discover_items(task: Task, discover_with_openmc: bool) -> list[str]:
+    """Return the item-name list for ``task`` (empty if discovery is unavailable).
+
+    ``discover_with_openmc`` takes the items from the OpenMC library, as the run
+    does whenever OpenMC takes part, rather than from yamc's data cache. The
+    fixed-geometry neutron models (tokamak, multimaterial slab) have their cells
+    or layers as items.
+    """
     fam = task.family
     ndir = task.nuclear_data_dir
+    if fam == "neutron" and task.geometry == "tokamak":
+        from .families import tokamak
+
+        return tokamak.discover(task, discover_with_openmc)
+    if fam == "neutron" and task.geometry == "multimaterial-slab":
+        from .families import multimaterial_slab
+
+        return multimaterial_slab.discover(task, discover_with_openmc)
     if fam == "neutron":
-        return discovery.discover_neutron_nuclides(ndir, task.library, run_openmc)
+        return discovery.discover_neutron_nuclides(ndir, task.library, discover_with_openmc)
     if fam == "photon":
-        return discovery.discover_photon_elements(ndir, task.library, run_openmc)
+        return discovery.discover_photon_elements(ndir, task.library, discover_with_openmc)
     if fam == "secondary-photon":
-        return [t[0] for t in discovery.discover_coupled_nuclides(ndir, task.library, run_openmc)]
+        return [t[0] for t in discovery.discover_coupled_nuclides(ndir, task.library, discover_with_openmc)]
     if fam == "decay-photon":
         chain = discovery.resolve_openmc_chain(task.library)
         tdata = discovery.transmutation_data_path(task.library)
@@ -63,23 +82,9 @@ def discover_items(task: Task, run_openmc: bool) -> list[str]:
     if fam in ("transmutation-reaction-rate", "transmutation-flux-spectrum"):
         chain = discovery.resolve_openmc_chain(task.library)
         tdata = discovery.transmutation_data_path(task.library)
-        items = discovery.discover_stable_nuclides(ndir, task.library, chain, tdata, run_openmc)
+        items = discovery.discover_stable_nuclides(ndir, task.library, chain, tdata, discover_with_openmc)
         return [i if isinstance(i, str) else i[0] for i in items]
     return []
-
-
-def _cache_info(cache_dir, library, code, key, build_keyed):
-    """Return (cached_valid: bool, elapsed_seconds: float | None) for one entry.
-
-    The wall time comes from the newest record of any build, so a new build
-    still starts with an ETA from the last one.
-    """
-    valid = find_record(
-        cache_dir, library, code, key, settings={"library": library}, build_keyed=build_keyed
-    ) is not None
-    newest = latest_record(cache_dir, library, code, key)
-    elapsed = newest[1].get("run", {}).get("elapsed_seconds") if newest else None
-    return valid, (float(elapsed) if isinstance(elapsed, (int, float)) else None)
 
 
 def real_codes(base_codes: list[str], task: Task) -> list[str]:
@@ -90,7 +95,7 @@ def real_codes(base_codes: list[str], task: Task) -> list[str]:
     ``yamc-cpu-ttb``, ...), exactly as :func:`secondary_photon.run_all` builds
     them. Every other family uses the backend code unchanged. Keeping this in
     step with the family is what lets the live progress events land on the
-    matching dashboard row instead of being dropped as unknown codes.
+    matching display row instead of being dropped as unknown codes.
     """
     treatments = task.extras.get("electron_treatments")
     if not treatments:
@@ -109,49 +114,29 @@ def _build_keyed(code: str, task: Task, backends: Backends) -> bool:
     return task.family in OPENMC_BUILD_KEYED_FAMILIES and backends.run_openmc
 
 
-def build_state(tasks: list[Task], backends: Backends) -> dict:
-    """Build the initial dashboard state (see :mod:`yamc_verify.dashboard`)."""
-    state = {
-        "yamc_version": code_identity("yamc")["version"],
-        "yamc_built_ago": yamc_build_age(),
-        "tasks": [],
-    }
-    for task in tasks:
-        codes = real_codes([c for c in task.codes if code_enabled(c, backends)], task)
-        try:
-            items = discover_items(task, backends.run_openmc)
-        except Exception:
-            items = []
-        code_entries = {}
-        for code in codes:
-            keyed = _build_keyed(code, task, backends)
-            cached = 0
-            seed_times = []
-            for key in items:
-                valid, elapsed = _cache_info(task.cache_dir, task.library, code, key, keyed)
-                if valid:
-                    cached += 1
-                if elapsed is not None:
-                    seed_times.append(elapsed)
-            seed_avg = (sum(seed_times) / len(seed_times)) if seed_times else None
-            code_entries[code] = {
-                "total": len(items),
-                "cached": cached,
-                "computed": 0,
-                "running_key": None,
-                "status": "queued",
-                "t_start": None,
-                "t_end": None,
-                "obs_times": [],
-                "seed_avg": seed_avg,
-            }
-        state["tasks"].append({
-            "key": task.key,
-            "label": task.label,
-            "notebook": task.notebook,
-            "status": "queued",
-            "t_start": None,
-            "t_end": None,
-            "codes": code_entries,
-        })
-    return state
+def task_rows(task: Task, labels: Sequence[str], items: Sequence[str],
+              find: Callable[[str], dict]) -> list[Row]:
+    """One :class:`vv.Row` per code label: the items, how many have a record, earlier times.
+
+    ``find(label)`` gives the keyword arguments of :func:`vv.records.find_record`
+    that say which record a run of that label accepts (a ``build_id``, an
+    ``accept`` predicate, or nothing for any build). The time per item is the
+    average wall time of the newest record of each item from any build, so a new
+    build still starts with an estimate from the last one.
+    """
+    cache_dir = os.path.join(REPO_ROOT, task.cache_dir)
+    settings = {"library": task.library}
+    rows = []
+    for label in labels:
+        how = find(label)
+        done, times = 0, []
+        for key in items:
+            if find_record(cache_dir, task.library, label, key, settings=settings, **how) is not None:
+                done += 1
+            newest = latest_record(cache_dir, task.library, label, key)
+            elapsed = newest[1].get("run", {}).get("elapsed_seconds") if newest else None
+            if isinstance(elapsed, (int, float)):
+                times.append(float(elapsed))
+        rows.append(Row(label=label, items=list(items), done=done,
+                        seconds_per_item=(sum(times) / len(times)) if times else None))
+    return rows

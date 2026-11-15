@@ -1,0 +1,2 @@
+# The project the `vv plan` and `vv run` commands use in this repository.
+project = "yamc_verify.project:PROJECT"

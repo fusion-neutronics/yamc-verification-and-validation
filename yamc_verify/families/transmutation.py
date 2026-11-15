@@ -624,7 +624,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
     chain_file = discovery.resolve_openmc_chain(task.library)
     openmc_meta, yamc_meta = _metas(task, chain_file)
 
-    items = discover(task, b.run_openmc)
+    items = discover(task, b.discover_with_openmc)
     if task.family == FLUX_SPECTRUM:
         names = [t[0] for t in items]
     else:

@@ -4,7 +4,7 @@ Some families cache their YAMC results (neutron, transmutation-reaction-rate)
 and some do not (photon, decay-photon, secondary-photon, transmutation-flux).
 OpenMC is always cached. ``run_step`` unifies both: it routes cached runs
 through :func:`cache_utils.cached_or_run` (which reports progress itself) and
-times + reports uncached runs the same way, so the orchestrator dashboard sees
+times + reports uncached runs the same way, so the live display sees
 every ``(item, code)`` regardless of caching policy.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from typing import Callable, Mapping, Optional
 
-from . import progress
+from vv import progress
 
 
 def run_step(
