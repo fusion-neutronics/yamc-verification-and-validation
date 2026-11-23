@@ -15,7 +15,7 @@
   "settings": {
     "library": "endf-b8.1",
     "method": "coupled",
-    "chain_file": "/home/jon/yamc-org/yamc-verification/.venv/lib/python3.13/site-packages/openmc_data/depletion/chain_endf_b8.1.xml",
+    "chain_file": "chain_endf_b8.1.xml",
     "sphere_radius": 5.0,
     "source_energy": 14060000.0,
     "material_density": 1.0,
@@ -36,7 +36,7 @@
     "chain": "full",
     "total_particles": 1000000
   },
-  "settings_hash": "52f75a15419ee075",
+  "settings_hash": "3744abb4be1777d3",
   "run": {
     "date": null,
     "host": null,

@@ -19,7 +19,7 @@
     "source_energy": 14060000.0,
     "photon_group_structure": "VITAMIN-J-42",
     "sphere_radius": 35.0,
-    "chain_file": "/home/jon/yamc-org/yamc-verification/.venv/lib/python3.13/site-packages/openmc_data/depletion/chain_endf_b8.1.xml",
+    "chain_file": "chain_endf_b8.1.xml",
     "d1s_timesteps": [
       3600.0,
       3600.0,
@@ -37,7 +37,7 @@
     "direct_products_only": false,
     "yamc_chain": "full"
   },
-  "settings_hash": "76305cd86c3bac9c",
+  "settings_hash": "055cbb87f47c2182",
   "run": {
     "date": null,
     "host": null,

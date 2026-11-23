@@ -29,6 +29,7 @@ registry (``task.dims``, ``task.particles``, ``task.source_energy``,
 """
 from __future__ import annotations
 
+import os
 import time
 
 import numpy as np
@@ -572,7 +573,7 @@ def _metas(task: Task, chain_file: str):
         common = {
             "library": task.library,
             "method": "coupled",
-            "chain_file": chain_file,
+            "chain_file": os.path.basename(chain_file),
             "sphere_radius": task.dims.sphere_radius,
             "source_energy": task.source_energy,
             "material_density": 1.0,
@@ -587,7 +588,7 @@ def _metas(task: Task, chain_file: str):
 
     openmc_meta = {
         "library": task.library,
-        "chain_file": chain_file,
+        "chain_file": os.path.basename(chain_file),
         "energy_groups": list(task.extras["energy_groups"]),
         "multigroup_flux": list(task.extras["multigroup_flux"]),
         "timesteps": list(task.extras["timesteps"]),

@@ -31,7 +31,7 @@ def _cross_sections_index(nuclear_data_dir: str) -> dict:
     if not os.path.isfile(path):
         raise FileNotFoundError(
             f"No cross_sections.xml in {nuclear_data_dir}. OpenMC finds a library's "
-            f"data through that file; check NUCLEAR_DATA_DIR in yamc_verify/tasks.py."
+            f"data through that file; set YAMC_VERIFY_NUCLEAR_DATA (see yamc_verify/tasks.py)."
         )
     index: dict = {}
     for library in ET.parse(path).getroot().findall("library"):
@@ -190,21 +190,21 @@ def discover_coupled_nuclides(nuclear_data_dir: str, library: str, run_openmc: b
 
 # ---- transmutation-chain-backed discovery (decay-photon, transmutation) ----
 def resolve_openmc_chain(library: str) -> str:
-    """Resolve the OpenMC depletion-chain XML path for ``library`` (best effort)."""
-    candidates = [
-        f"/home/jon/yamc-org/openmc_data/src/openmc_data/depletion/chain_{library.replace('-', '_')}.xml",
-        "/home/jon/yamc-org/openmc_data/src/openmc_data/depletion/chain_endf_b8.1.xml",
-    ]
+    """Resolve the OpenMC depletion-chain XML path for ``library`` (best effort).
+
+    ``YAMC_VERIFY_OPENMC_CHAIN`` names the file directly; otherwise the chain
+    shipped with an installed ``openmc_data`` is used."""
+    candidates = [os.environ["YAMC_VERIFY_OPENMC_CHAIN"]] if os.environ.get("YAMC_VERIFY_OPENMC_CHAIN") else []
+    names = [f"chain_{library.replace('-', '_')}.xml", "chain_endf_b8.1.xml"]
     try:
         import openmc_data as _omc_data
 
-        candidates.append(os.path.join(
-            os.path.dirname(_omc_data.__file__), "depletion", "chain_endf_b8.1.xml"))
+        candidates += [os.path.join(os.path.dirname(_omc_data.__file__), "depletion", n) for n in names]
     except Exception:
         pass
-    candidates += sorted(glob.glob(
-        "/home/jon/*/.venv/lib/python*/site-packages/openmc_data/depletion/chain_endf_b8.1.xml"))
-    return next((p for p in candidates if os.path.exists(p)), candidates[0])
+    candidates += sorted(glob.glob(os.path.expanduser(
+        "~/*/.venv/lib/python*/site-packages/openmc_data/depletion/chain_endf_b8.1.xml")))
+    return next((p for p in candidates if os.path.exists(p)), candidates[0] if candidates else names[0])
 
 
 # The transmutation subsections ``yamc.TransmutationChain`` reads from a chain

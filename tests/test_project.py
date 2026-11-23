@@ -20,10 +20,9 @@ def libraries(tmp_path, monkeypatch):
     data = tmp_path / "endf"
     data.mkdir()
     (data / "cross_sections.xml").write_text("<cross_sections/>")
-    dirs = {lib: str(tmp_path / f"absent-{lib}") for lib in tasks.NUCLEAR_DATA_DIR}
-    dirs["endf-b8.1"] = str(data)
-    monkeypatch.setattr(tasks, "NUCLEAR_DATA_DIR", dirs)
-    return dirs
+    monkeypatch.setenv(tasks.NUCLEAR_DATA_ENV, str(tmp_path / "absent"))
+    monkeypatch.setenv(tasks.library_env("endf-b8.1"), str(data))
+    return {lib: tasks.nuclear_data_dir(lib) for lib in tasks.NUCLEAR_DATA_SUBDIRS}
 
 
 @pytest.fixture

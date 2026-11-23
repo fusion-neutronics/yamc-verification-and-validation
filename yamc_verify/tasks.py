@@ -9,18 +9,42 @@ planner never disagree about what will run.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 from .geometry import GeometryDims
 
-# User-specific nuclear-data HDF5 roots (mirrors the notebooks' NUCLEAR_DATA_DIR).
-NUCLEAR_DATA_DIR = {
-    "endf-b8.1": "/home/jon/nuclear_data/endf-b8.1-hdf5/endfb-viii.1-hdf5/",
-    "endf-b8.0": "/home/jon/nuclear_data/endf-b8.0-hdf5/",
-    "tendl-2021": "/home/jon/nuclear_data/tendl-2021-hdf5/tendl-2021-hdf5/",
+# OpenMC HDF5 libraries live under one root, ``YAMC_VERIFY_NUCLEAR_DATA``
+# (default ``~/nuclear_data``), each in the folder below as unpacked. A library
+# kept elsewhere can be named directly with ``YAMC_VERIFY_NUCLEAR_DATA_<LIBRARY>``,
+# the library name upper-cased with ``-`` and ``.`` as ``_`` (for example
+# ``YAMC_VERIFY_NUCLEAR_DATA_ENDF_B8_1``). yamc does not read these files.
+NUCLEAR_DATA_ENV = "YAMC_VERIFY_NUCLEAR_DATA"
+NUCLEAR_DATA_SUBDIRS = {
+    "endf-b8.1": "endf-b8.1-hdf5/endfb-viii.1-hdf5",
+    "endf-b8.0": "endf-b8.0-hdf5",
+    "tendl-2021": "tendl-2021-hdf5/tendl-2021-hdf5",
     # The IAEA's HDF5 build of FENDL-3.2d (fendl-3.2d-T1-hdf5.zip), unpacked as is.
-    "fendl-3.2d": "/home/jon/nuclear_data/fendl-3.2d-hdf5/",
+    "fendl-3.2d": "fendl-3.2d-hdf5",
 }
+
+
+def library_env(library: str) -> str:
+    """The variable that names ``library``'s folder directly."""
+    return f"{NUCLEAR_DATA_ENV}_{re.sub(r'[-.]', '_', library).upper()}"
+
+
+def nuclear_data_dir(library: str) -> str | None:
+    """Folder holding ``library``'s ``cross_sections.xml`` (with a trailing
+    separator), or ``None`` for a library with no known folder."""
+    folder = os.environ.get(library_env(library))
+    if not folder:
+        if library not in NUCLEAR_DATA_SUBDIRS:
+            return None
+        root = os.environ.get(NUCLEAR_DATA_ENV) or "~/nuclear_data"
+        folder = os.path.join(root, NUCLEAR_DATA_SUBDIRS[library])
+    return os.path.join(os.path.expanduser(folder), "")
+
 
 # Families whose OpenMC references must come from the installed OpenMC build
 # while OpenMC runs, as well as match their run settings: their photon physics
@@ -55,7 +79,7 @@ class Task:
 
     @property
     def nuclear_data_dir(self) -> str:
-        return NUCLEAR_DATA_DIR[self.library]
+        return nuclear_data_dir(self.library)
 
 
 def _mc_codes():

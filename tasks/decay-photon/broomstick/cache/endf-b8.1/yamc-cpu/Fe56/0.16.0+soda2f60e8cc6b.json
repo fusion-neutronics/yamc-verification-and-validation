@@ -20,7 +20,7 @@
     "photon_group_structure": "VITAMIN-J-42",
     "cylinder_radius": 1.0,
     "cylinder_half_height": 50.0,
-    "chain_file": "/home/jon/yamc-org/yamc-verification/.venv/lib/python3.13/site-packages/openmc_data/depletion/chain_endf_b8.1.xml",
+    "chain_file": "chain_endf_b8.1.xml",
     "d1s_timesteps": [
       3600.0,
       3600.0,
@@ -38,7 +38,7 @@
     "direct_products_only": false,
     "yamc_chain": "full"
   },
-  "settings_hash": "bf45f835ddc1056c",
+  "settings_hash": "2e24137e708c1489",
   "run": {
     "date": null,
     "host": null,

@@ -201,11 +201,13 @@ def _main(argv=None):
     ap.add_argument(
         "photon_dir",
         nargs="?",
-        default="/home/jon/nuclear_data/endf-b8.1-hdf5/endfb-viii.1-hdf5/photon",
-        help="directory of <Element>.h5 photon files",
+        default=None,
+        help="directory of <Element>.h5 photon files (default: endf-b8.1's photon folder)",
     )
     args = ap.parse_args(argv)
-    out = generate_fluorescence_lines(args.photon_dir)
+    from .tasks import nuclear_data_dir
+
+    out = generate_fluorescence_lines(args.photon_dir or nuclear_data_dir("endf-b8.1") + "photon")
     print(f"wrote {_FLUOR_PATH} ({len(out)} elements)")
 
 
