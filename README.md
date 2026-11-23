@@ -89,8 +89,14 @@ assert result.ok, result.failures
   `secondary-photon/broomstick`, ...), or `all` for every model defined on the
   libraries. A pair that is not defined (the tokamak has no FENDL task, say) is
   listed as not run.
-- **Libraries** must have their OpenMC data where `NUCLEAR_DATA_DIR` in
-  `yamc_verify/tasks.py` says (a `cross_sections.xml`).
+- **Libraries** must have their OpenMC data (a `cross_sections.xml`) under
+  `YAMC_VERIFY_NUCLEAR_DATA` (default `~/nuclear_data`), in the folder
+  `NUCLEAR_DATA_SUBDIRS` in `yamc_verify/tasks.py` gives for the library. A
+  library kept elsewhere is named directly with
+  `YAMC_VERIFY_NUCLEAR_DATA_<LIBRARY>`, for example
+  `YAMC_VERIFY_NUCLEAR_DATA_ENDF_B8_1=/data/endfb-viii.1-hdf5`. The transmutation
+  and decay-photon OpenMC runs use the depletion chain from an installed
+  `openmc_data`, or the file `YAMC_VERIFY_OPENMC_CHAIN` names.
 - **Codes** are `openmc==<version>`, `yamc-cpu==<version>`,
   `yamc-gpu==<version>`, `yamc-cpu@<commit>` or `yamc-gpu@<commit>`. Each code
   version runs in its own environment (see
@@ -243,7 +249,8 @@ run_task(get_task("neutron/sphere/endf-b8.1"), backends.resolve("openmc-cpu,yamc
 
 ## Adding a nuclear data library
 
-1. Add the library path to `NUCLEAR_DATA_DIR` in `yamc_verify/tasks.py`.
+1. Add the library's folder, relative to `YAMC_VERIFY_NUCLEAR_DATA`, to
+   `NUCLEAR_DATA_SUBDIRS` in `yamc_verify/tasks.py`.
 2. Register a `Task` for each model/geometry using the new library (copy an
    existing entry and change `library`/`particles`).
 3. Run it (`vv run --models <model> --libraries <library> --codes ...`); the

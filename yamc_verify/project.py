@@ -23,7 +23,7 @@ without its library, such as ``neutron/sphere``) or ``"all"``. A code is one of
   of a local core checkout (``$YAMC_CORE_ROOT``, else ``../core``).
 
 A library is available when its OpenMC data (``cross_sections.xml``) is where
-``NUCLEAR_DATA_DIR`` in :mod:`yamc_verify.tasks` says. Which items run is chosen
+``YAMC_VERIFY_NUCLEAR_DATA`` (see :func:`yamc_verify.tasks.nuclear_data_dir`) says. Which items run is chosen
 as before, by ``YAMC_VERIFY_NUCLIDES``, ``YAMC_VERIFY_ELEMENTS`` and
 ``YAMC_VERIFY_NUMBER_OF_SIMULATIONS``.
 """
@@ -83,9 +83,10 @@ class YamcProject(vv.Project):
         for task in tasks.all_tasks():
             if task.library in out:
                 continue
-            folder = tasks.NUCLEAR_DATA_DIR.get(task.library)
+            folder = tasks.nuclear_data_dir(task.library)
             if folder is None:
-                out[task.library] = "no NUCLEAR_DATA_DIR entry in yamc_verify/tasks.py"
+                out[task.library] = (f"no folder known; set {tasks.library_env(task.library)} "
+                                     "or add it to NUCLEAR_DATA_SUBDIRS in yamc_verify/tasks.py")
             elif not os.path.isfile(os.path.join(folder, "cross_sections.xml")):
                 out[task.library] = f"no cross_sections.xml in {folder}"
             else:

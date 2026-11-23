@@ -14,7 +14,7 @@
   },
   "settings": {
     "library": "endf-b8.1",
-    "chain_file": "/home/jon/yamc-org/yamc-verification/.venv/lib/python3.13/site-packages/openmc_data/depletion/chain_endf_b8.1.xml",
+    "chain_file": "chain_endf_b8.1.xml",
     "energy_groups": [
       1e-05,
       0.625,
@@ -42,7 +42,7 @@
     ],
     "chain": "full"
   },
-  "settings_hash": "1fbec58a44a1a5cd",
+  "settings_hash": "6040d42eb6909387",
   "run": {
     "date": null,
     "host": null,

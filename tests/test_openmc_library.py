@@ -33,7 +33,7 @@ FILES = ("atom/hdf5/Ag.h5", "atom/hdf5/Fe.h5", "neutron/hdf5/01H_001.h5", "neutr
 
 @pytest.fixture
 def library(tmp_path, monkeypatch):
-    """A library laid out like the IAEA FENDL-3.2d one, as NUCLEAR_DATA_DIR names it."""
+    """A library laid out like the IAEA FENDL-3.2d one, as its nuclear-data folder holds it."""
     (tmp_path / "cross_sections.xml").write_text(XML)
     for path in FILES:
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
@@ -71,5 +71,5 @@ def test_coupled_discovery_carries_the_listed_paths(library):
 
 
 def test_a_directory_without_cross_sections_xml_names_the_setting(tmp_path):
-    with pytest.raises(FileNotFoundError, match="NUCLEAR_DATA_DIR"):
+    with pytest.raises(FileNotFoundError, match="YAMC_VERIFY_NUCLEAR_DATA"):
         discovery.openmc_library(str(tmp_path), "neutron")

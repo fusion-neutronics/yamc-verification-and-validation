@@ -561,7 +561,8 @@ def _openmc_meta(task: Task) -> dict:
     elif task.geometry == "broomstick":
         meta["cylinder_radius"] = task.dims.cylinder_radius
         meta["cylinder_half_height"] = task.dims.cylinder_half_height
-    meta["chain_file"] = discovery.resolve_openmc_chain(task.library)
+    # The file name, not its path, so records match on any machine.
+    meta["chain_file"] = os.path.basename(discovery.resolve_openmc_chain(task.library))
     meta["d1s_timesteps"] = list(task.extras["timesteps"])
     meta["d1s_source_rates"] = list(task.extras["source_rates"])
     return meta

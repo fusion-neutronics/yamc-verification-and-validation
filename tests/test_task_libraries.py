@@ -2,10 +2,11 @@
 
 yamc reads a task's library by keyword, so the keyword must be one the yamc
 data origin publishes (each has a ``<keyword>/latest.json`` on
-yamc-data.xsplot.com). OpenMC reads the directory ``NUCLEAR_DATA_DIR`` names
+yamc-data.xsplot.com). OpenMC reads the directory ``tasks.nuclear_data_dir`` names
 for it. The FENDL tasks once named ``fendl-3.2c``, which yamc does not
 publish, so their yamc side could not run at all.
 """
+import os
 import sys
 import types
 
@@ -26,7 +27,7 @@ def test_every_task_names_a_library_yamc_publishes():
 
 
 def test_every_task_library_has_an_openmc_data_directory():
-    missing = sorted({t.library for t in tasks.all_tasks()} - set(tasks.NUCLEAR_DATA_DIR))
+    missing = sorted({t.library for t in tasks.all_tasks()} - set(tasks.NUCLEAR_DATA_SUBDIRS))
     assert not missing, f"no OpenMC data directory for {missing}"
 
 
@@ -117,3 +118,16 @@ def test_yamc_coupled_runs_select_photon_data_from_the_task_library(key, monkeyp
     with pytest.raises(_Loaded):
         family("Fe56", None, "Fe", None, task)
     assert loads == [(task.library, {"Fe": task.library})]
+
+
+def test_nuclear_data_folders_come_from_the_environment(monkeypatch, tmp_path):
+    for lib in tasks.NUCLEAR_DATA_SUBDIRS:
+        monkeypatch.delenv(tasks.library_env(lib), raising=False)
+    monkeypatch.delenv(tasks.NUCLEAR_DATA_ENV, raising=False)
+    home = os.path.expanduser("~/nuclear_data")
+    assert tasks.nuclear_data_dir("endf-b8.0") == os.path.join(home, "endf-b8.0-hdf5", "")
+    monkeypatch.setenv(tasks.NUCLEAR_DATA_ENV, str(tmp_path))
+    assert tasks.nuclear_data_dir("fendl-3.2d") == os.path.join(str(tmp_path), "fendl-3.2d-hdf5", "")
+    monkeypatch.setenv("YAMC_VERIFY_NUCLEAR_DATA_ENDF_B8_1", str(tmp_path / "b81"))
+    assert tasks.nuclear_data_dir("endf-b8.1") == os.path.join(str(tmp_path / "b81"), "")
+    assert tasks.nuclear_data_dir("no-such-library") is None
