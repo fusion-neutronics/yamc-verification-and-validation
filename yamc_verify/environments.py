@@ -5,9 +5,10 @@ A code is named explicitly, with no default version:
 * ``openmc==0.16.1.dev0``: an OpenMC wheel from the wheels index in
   ``requirements.txt`` (``--extra-index-url``). Only the versions published
   there can be installed; asking for another lists them.
-* ``yamc==0.21.0``: the ``yamc-core`` release from PyPI.
-* ``yamc@<commit>``: ``yamc-core`` built from that commit of a local core
-  checkout (``core_dir``, else ``$YAMC_CORE_ROOT``, else ``../core``).
+* ``yamc==0.27.0``: the ``yamc`` release from PyPI.
+* ``yamc@<commit>``: ``yamc`` built from that commit of a local core checkout,
+  fusion-neutronics/yamc-and-yani (``core_dir``, else ``$YAMC_CORE_ROOT``, else
+  ``../yamc-and-yani``), the way its CI builds the wheel.
 
 Each environment lives under ``~/.cache/yamc-verification/envs/`` and holds the
 verification dependencies from ``requirements.txt``, the requested code at the
@@ -38,7 +39,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ENVS_ROOT = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "yamc-verification" / "envs"
 _READY = "ready.json"
-_PACKAGES = {"openmc": "openmc", "yamc": "yamc-core"}
+_PACKAGES = {"openmc": "openmc", "yamc": "yamc"}
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,7 @@ def _base_requirements() -> list[str]:
         req = line.split("#", 1)[0].strip()
         if not req or req.startswith("-"):
             continue
-        if re.match(r"(openmc|yamc-core|yamc)\b(?![_-])", req):
+        if re.match(r"(openmc|yamc)\b(?![_-])", req):
             continue
         out.append(req)
     return out
@@ -125,10 +126,11 @@ def env_dir(spec: CodeSpec, commit: str | None = None) -> Path:
 
 
 def _core_dir(core_dir: Path | str | None) -> Path:
-    path = Path(core_dir or os.environ.get("YAMC_CORE_ROOT") or REPO_ROOT.parent / "core")
-    if not (path / "packages" / "yamc-core").is_dir():
+    path = Path(core_dir or os.environ.get("YAMC_CORE_ROOT") or REPO_ROOT.parent / "yamc-and-yani")
+    if not (path / "packages" / "yamc").is_dir():
         raise FileNotFoundError(
-            f"no core checkout at {path}: pass core_dir or set YAMC_CORE_ROOT to build a yamc commit"
+            f"no core checkout (fusion-neutronics/yamc-and-yani) at {path}: pass core_dir or set "
+            "YAMC_CORE_ROOT to build a yamc commit"
         )
     return path.resolve()
 
@@ -170,7 +172,7 @@ def _check(spec: CodeSpec, identity: dict, commit: str | None) -> None:
     if got["commit"] != commit:
         raise RuntimeError(
             f"{spec}: the built yamc reports commit {got['commit']!r}, not {commit}. "
-            "A yamc-core older than the release that adds yamc.__commit__ cannot be "
+            "A yamc older than the release that adds yamc.__commit__ cannot be "
             "built by commit."
         )
     if got["dirty"]:
@@ -180,7 +182,7 @@ def _check(spec: CodeSpec, identity: dict, commit: str | None) -> None:
 def available_versions(name: str) -> list[str]:
     """The published versions of a code's package (``[]`` if they cannot be listed).
 
-    OpenMC comes from the wheels index in ``requirements.txt`` and yamc-core from
+    OpenMC comes from the wheels index in ``requirements.txt`` and yamc from
     PyPI, the same places :func:`ensure` installs from.
     """
     out = subprocess.run(
@@ -195,10 +197,17 @@ def check_available(spec: CodeSpec | str, *, core_dir: Path | str | None = None)
     """Raise ``ValueError``, listing what is available, if ``spec`` cannot be installed.
 
     A release must be published for the Python running this (environments are
-    built with it); a commit must be in the core checkout.
+    built with it); a commit must be in the core checkout, and building it needs
+    wasm-pack.
     """
     spec = parse_code(spec) if isinstance(spec, str) else spec
     if spec.kind == "commit":
+        if shutil.which("wasm-pack") is None:
+            raise ValueError(
+                f"{spec}: building a yamc commit needs wasm-pack, which builds the wasm viewers "
+                "the wheel ships. Install it with: "
+                "curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh"
+            )
         try:
             resolve_commit(_core_dir(core_dir), spec.ref)
         except FileNotFoundError as e:
@@ -243,23 +252,41 @@ def ready_identity(spec: CodeSpec | str, *, core_dir: Path | str | None = None) 
     return json.loads(ready.read_text()) if ready is not None and ready.exists() else None
 
 
+# The wasm viewers the yamc wheel ships are not committed in core: its CI builds
+# them before the wheel, and yamc-plot include_bytes!s one of them, so the wheel
+# does not compile without them. Core keeps the same build as this script.
+WASM_SCRIPT = "scripts/build_wasm_blobs.sh"
+WHEEL_FEATURES = "mesh,cad,gpu"
+
+
 def _build_yamc_wheel(core_dir: Path, commit: str, env: Path, work: Path) -> Path:
-    """Build yamc-core at ``commit`` in a throwaway worktree; return the wheel."""
+    """Build yamc at ``commit`` in a throwaway worktree, as core's CI does; return the wheel.
+
+    The wasm blobs first (core's :data:`WASM_SCRIPT`), then the wheel with
+    maturin from ``packages/yamc``.
+    """
     src = work / "src"
     _run(["git", "-C", core_dir, "worktree", "add", "--detach", "--force", src, commit])
     try:
-        _run([_python(env), "-m", "pip", "install", "--quiet", "maturin"])
-        maturin = _python(env).parent / ("maturin.exe" if os.name == "nt" else "maturin")
+        if not (src / WASM_SCRIPT).is_file():
+            raise RuntimeError(
+                f"yamc@{commit[:12]} has no {WASM_SCRIPT}: it is older than the yamc wheel "
+                "built from yamc-and-yani, so it cannot be built here"
+            )
         # Its own target directory: two checkouts sharing one reuse each other's
         # crates, because the path remapping makes them look identical to cargo.
         build_env = {**os.environ, "CARGO_TARGET_DIR": str(work / "target")}
-        _run([maturin, "build", "--release", "-o", work / "dist", "-i", _python(env)],
-             cwd=src / "packages" / "yamc-core", env=build_env)
+        _run(["bash", src / WASM_SCRIPT], cwd=src, env=build_env)
+        _run([_python(env), "-m", "pip", "install", "--quiet", "maturin"])
+        maturin = _python(env).parent / ("maturin.exe" if os.name == "nt" else "maturin")
+        # The features core's CI builds its Linux wheel with, so yamc-gpu runs.
+        _run([maturin, "build", "--release", "--features", WHEEL_FEATURES, "-o", work / "dist",
+              "-i", _python(env)], cwd=src / "packages" / "yamc", env=build_env)
     finally:
         _run(["git", "-C", core_dir, "worktree", "remove", "--force", src])
-    wheels = sorted((work / "dist").glob("yamc_core-*.whl"))
+    wheels = sorted((work / "dist").glob("yamc-*.whl"))
     if len(wheels) != 1:
-        raise RuntimeError(f"expected one yamc-core wheel from the build, found {wheels}")
+        raise RuntimeError(f"expected one yamc wheel from the build, found {wheels}")
     return wheels[0]
 
 
@@ -312,7 +339,7 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("ensure", help="build (if needed) and check environments")
     e.add_argument("codes", nargs="+", help="openmc==X, yamc==X or yamc@<commit>")
-    e.add_argument("--core-dir", help="core checkout for yamc@<commit> (default $YAMC_CORE_ROOT or ../core)")
+    e.add_argument("--core-dir", help="core checkout for yamc@<commit> (default $YAMC_CORE_ROOT or ../yamc-and-yani)")
     e.add_argument("--rebuild", action="store_true", help="rebuild even if ready")
     sub.add_parser("list", help="list ready environments")
     args = ap.parse_args(argv)

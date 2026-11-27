@@ -30,7 +30,7 @@ NEUTRON_SCORES = (
 
 
 def core_config(core_dir):
-    tests = Path(core_dir).resolve() / "packages" / "yamc-core" / "tests"
+    tests = Path(core_dir).resolve() / "packages" / "yamc" / "tests"
     if not (tests / "regression_tests" / "_config.py").is_file():
         raise FileNotFoundError(f"No core regression configuration under {tests}")
     sys.path.insert(0, str(tests))
@@ -322,7 +322,7 @@ class OpenMCReferences:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--core-dir", type=Path, default=Path(os.environ.get("YAMC_CORE_ROOT", "../core")))
+    parser.add_argument("--core-dir", type=Path, default=Path(os.environ.get("YAMC_CORE_ROOT", "../yamc-and-yani")))
     parser.add_argument("--cross-sections", default=os.environ.get("OPENMC_CROSS_SECTIONS"))
     parser.add_argument("--output-dir", type=Path, default=Path("validation-results/openmc"))
     parser.add_argument("--types", nargs="+", choices=TYPES, default=list(TYPES))
