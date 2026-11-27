@@ -105,12 +105,17 @@ class ReleaseCheck:
         that run's own records of them.
     bands : list of str
         Every band :meth:`Project.grades` gives, best first.
+    environment : dict, optional
+        Variables the check sets while it runs, ``None`` unsetting one, so
+        that every check runs the same items whatever the caller's
+        environment says.
     """
 
     models: Union[str, Sequence[str]]
     libraries: Sequence[str]
     references: Sequence[str]
     bands: Sequence[str]
+    environment: Mapping[str, Optional[str]] = field(default_factory=dict)
 
 
 @dataclass

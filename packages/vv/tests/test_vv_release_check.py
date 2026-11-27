@@ -7,6 +7,7 @@ by how far its value is from the reference's.
 """
 import io
 import json
+import os
 import subprocess
 import sys
 
@@ -189,6 +190,25 @@ def test_the_check_runs_the_set_then_reports(repo):
     assert [(job.model, job.code.name) for job, _ in result.failures] == [("slab", "code-a")]
     status = {f.key[3]: f.status for f in report.findings}
     assert status == {"Fe56": "same", "H1": "same", "Li6": "same", "Li7": "worse", "W": "fails"}
+
+
+def test_the_check_pins_its_environment_while_it_runs(repo, monkeypatch):
+    project = CheckProject(repo, values={("sphere", "code-a"): {"Fe56": 10.0}})
+    project.release_check = vv.ReleaseCheck(models=vv.ALL, libraries=["lib-a"], references=["ref"], bands=BANDS,
+                                            environment={"CHECK_ITEMS": "all", "NARROW": None})
+    monkeypatch.setenv("NARROW", "Fe56")
+    monkeypatch.delenv("CHECK_ITEMS", raising=False)
+    seen, rows = [], project.rows
+
+    def recording_rows(*args):
+        seen.append((os.environ.get("CHECK_ITEMS"), os.environ.get("NARROW")))
+        return rows(*args)
+
+    project.rows = recording_rows
+    _, report = release_check.release_check(project, ["code-a==1.1"], stream=io.StringIO())
+    assert seen and set(seen) == {("all", None)}
+    assert os.environ["NARROW"] == "Fe56" and "CHECK_ITEMS" not in os.environ
+    assert "set: every model on lib-a (CHECK_ITEMS=all, NARROW unset)" in report.format()
 
 
 @pytest.mark.parametrize("codes, problem", [

@@ -205,13 +205,18 @@ class YamcProject(vv.Project):
 
     @property
     def release_check(self) -> vv.ReleaseCheck:
-        """What ``vv run --release-check`` runs before a yamc release: every model on ENDF/B-VIII.1.
+        """What ``vv run --release-check`` runs before a yamc release.
 
-        Each yamc result is graded against the OpenMC reference of the newest
-        published run, in the site's bands (fusion-neutronics/yamc-and-yani#55).
+        Every model on ENDF/B-VIII.1, on every stable isotope (and for the
+        photon models every element with a stable isotope), whatever item
+        variables the caller has set. Each yamc result is graded against the
+        OpenMC reference of the newest published run, in the site's bands
+        (fusion-neutronics/yamc-and-yani#55).
         """
         from .index_builder import QUALITY_ORDER
-        return vv.ReleaseCheck(models=vv.ALL, libraries=["endf-b8.1"], references=["openmc"], bands=QUALITY_ORDER)
+        return vv.ReleaseCheck(models=vv.ALL, libraries=["endf-b8.1"], references=["openmc"], bands=QUALITY_ORDER,
+                               environment={"YAMC_VERIFY_NUMBER_OF_SIMULATIONS": "-1",
+                                            "YAMC_VERIFY_NUCLIDES": None, "YAMC_VERIFY_ELEMENTS": None})
 
     def grades(self, run) -> dict[tuple[str, str, str, str], vv.Grade]:
         """The site's grade of each yamc result in ``run`` against the OpenMC reference beside it."""

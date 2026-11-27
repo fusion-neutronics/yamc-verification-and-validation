@@ -245,10 +245,14 @@ Before releasing yamc, run the release check on the commit you mean to release:
 vv run --release-check yamc-cpu@<commit> yamc-gpu@<commit>
 ```
 
-It runs a fixed set, every model on ENDF/B-VIII.1 at the particle counts in
-`yamc_verify/tasks.py` (`YamcProject.release_check`), with those codes and with
-OpenMC at the version the newest published run has. That run's OpenMC records
-usually exist already, so normally only yamc runs. Each yamc result is then
+It runs a fixed set (`YamcProject.release_check`): every model on
+ENDF/B-VIII.1 at the particle counts in `yamc_verify/tasks.py`, on every stable
+isotope and, for the photon models, every element with a stable isotope. It
+sets `YAMC_VERIFY_NUMBER_OF_SIMULATIONS=-1` and ignores `YAMC_VERIFY_NUCLIDES`
+and `YAMC_VERIFY_ELEMENTS`, so every release is checked on the same items. It
+runs those codes, and OpenMC at the version the newest published run has. That
+run's OpenMC records usually exist already, so normally only yamc runs: about
+6,000 results, which `vv plan` puts at several days. Each yamc result is then
 graded against the published run's own OpenMC record of that item, so a grade
 can only move because yamc did, and compared with the grade the published run
 gives it, in the site's bands (Excellent, Good, Fair, Poor). It lists:
@@ -273,10 +277,10 @@ It exits with 1 when anything is flagged or a job failed, but it only reports:
 whether to release stays a human decision. It needs a published run to compare
 with (see [Comparing and publishing a run](#comparing-and-publishing-a-run)).
 Name only the backends to check; a backend the published run has no results
-for is all `new`. `vv plan --models all --libraries endf-b8.1 --codes
-openmc==<published version> yamc-cpu@<commit>` shows what it would run and
-roughly how long. The `YAMC_VERIFY_*` item variables narrow it as they narrow
-`vv run`, and the published items it then skips are listed as missing.
+for is all `new`. `YAMC_VERIFY_NUMBER_OF_SIMULATIONS=-1 vv plan --models all
+--libraries endf-b8.1 --codes openmc==<published version> yamc-cpu@<commit>`
+shows what it would run and roughly how long. For a quick look at a few items,
+use `vv run` with the item variables instead.
 
 ## Shared code (`yamc_verify/`)
 

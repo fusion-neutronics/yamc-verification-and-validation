@@ -20,6 +20,8 @@ with). The check only reports: whether to release stays a human decision.
 """
 from __future__ import annotations
 
+import contextlib
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, TextIO
@@ -138,7 +140,7 @@ class Report:
                  f"against {s.against.tag} (published {s.against.date}), graded with its "
                  f"{', '.join(s.references)} records",
                  f"set: {'every model' if s.check.models == ALL else ', '.join(self.models)} "
-                 f"on {', '.join(self.libraries)}"]
+                 f"on {', '.join(self.libraries)}" + _environment_note(s.check.environment)]
         for code in self.unpublished:
             lines.append(f"the published run has no {code.name} results, so every grade of {code.spec} is new")
         label_width = max((len(f.key[2]) for f in self.findings), default=0)
@@ -163,6 +165,32 @@ class Report:
             lines.append(f"{len(self.flagged)} flagged: review them before releasing "
                          "(the check only reports; releasing stays your decision)")
         return "\n".join(lines)
+
+
+def _environment_note(environment: Mapping[str, Optional[str]]) -> str:
+    if not environment:
+        return ""
+    parts = [f"{k}={v}" if v is not None else f"{k} unset" for k, v in environment.items()]
+    return f" ({', '.join(parts)})"
+
+
+@contextlib.contextmanager
+def pinned_environment(environment: Mapping[str, Optional[str]]):
+    """Set (or, for ``None``, unset) each variable for the duration, then put them back."""
+    before = {k: os.environ.get(k) for k in environment}
+    try:
+        for k, v in environment.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        yield
+    finally:
+        for k, v in before.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _describe(f: Finding) -> str:
@@ -245,15 +273,18 @@ def release_check(project: Project, codes, *, stream: Optional[TextIO] = None) -
     """Run the project's release-check set with ``codes``, then compare it with the newest published run.
 
     The references run at the published run's versions, so their records
-    usually exist already and only the candidates run. Returns the run and
-    the :class:`Report`; neither stops a release.
+    usually exist already and only the candidates run. The check's
+    :attr:`~vv.ReleaseCheck.environment` is set while it plans and runs, so
+    it chooses the same items every time. Returns the run and the
+    :class:`Report`; neither stops a release.
     """
     s = setup(project, codes)
     models = ALL if s.check.models == ALL else list(s.check.models)
-    result = run(project, models=models, libraries=list(s.check.libraries), codes=s.codes, stream=stream)
+    with pinned_environment(s.check.environment):
+        result = run(project, models=models, libraries=list(s.check.libraries), codes=s.codes, stream=stream)
     failed = {(job.model, job.library, job.code.name): log for job, log in result.failures}
     return result, _report(project, s, failed)
 
 
-__all__ = ["FLAGGED", "Finding", "ReleaseCheckError", "Report", "STATUSES", "Setup", "release_check", "report",
-           "setup"]
+__all__ = ["FLAGGED", "Finding", "ReleaseCheckError", "Report", "STATUSES", "Setup", "pinned_environment",
+           "release_check", "report", "setup"]
