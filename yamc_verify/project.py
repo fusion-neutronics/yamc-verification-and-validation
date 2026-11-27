@@ -203,6 +203,28 @@ class YamcProject(vv.Project):
                     out.append(found[0])
         return out
 
+    @property
+    def release_check(self) -> vv.ReleaseCheck:
+        """What ``vv run --release-check`` runs before a yamc release: every model on ENDF/B-VIII.1.
+
+        Each yamc result is graded against the OpenMC reference of the newest
+        published run, in the site's bands (fusion-neutronics/yamc-and-yani#55).
+        """
+        from .index_builder import QUALITY_ORDER
+        return vv.ReleaseCheck(models=vv.ALL, libraries=["endf-b8.1"], references=["openmc"], bands=QUALITY_ORDER)
+
+    def grades(self, run) -> dict[tuple[str, str, str, str], vv.Grade]:
+        """The site's grade of each yamc result in ``run`` against the OpenMC reference beside it."""
+        from .index_builder import QUALITY_ORDER, benchmarks
+        out = {}
+        entries, _ = benchmarks(run, tasks.all_tasks(), root=self.root)
+        for b in entries:
+            model, library = b["task"].rsplit("/", 1)
+            for c in b["comparisons"]:
+                if c.get("quality") in QUALITY_ORDER:
+                    out[(model, library, c["code"], b["item"])] = vv.Grade(c["quality"], _grade_note(c))
+        return out
+
     def rows(self, model: str, library: str, code: vv.Code, codes: Sequence[vv.Code]) -> list[vv.Row]:
         """The items of one task for ``code``, how many have a record it accepts, and earlier times."""
         task = tasks.get_task(f"{model}/{library}")
@@ -226,6 +248,23 @@ class YamcProject(vv.Project):
             "PYTHONPATH": os.pathsep.join([str(VV_SRC), str(REPO_ROOT)]),
         }
         return vv.Command(argv, env, cwd=REPO_ROOT)
+
+
+def _grade_note(comparison: dict) -> str:
+    """The numbers behind a comparison's grade, for the release check."""
+    def pct(value) -> str:
+        return f"{value:.3g}%" if isinstance(value, (int, float)) else "n/a"
+
+    if comparison.get("kind") == "transmutation":
+        return f"worst density {pct(comparison.get('max_rel_diff_pct'))}"
+    parts = []
+    chi2 = comparison.get("residual_reduced_chi_squared", comparison.get("reduced_chi_squared"))
+    if chi2 is not None:
+        parts.append(f"chi2/N {chi2:.3g}")
+    if comparison.get("max_tally_rel_diff_pct") is not None:
+        tally = comparison.get("worst_tally")
+        parts.append(f"worst tally {pct(comparison['max_tally_rel_diff_pct'])}" + (f" ({tally})" if tally else ""))
+    return ", ".join(parts)
 
 
 def _same_version(reported, version: str) -> bool:

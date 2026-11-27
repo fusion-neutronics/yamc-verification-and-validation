@@ -4,6 +4,9 @@
 what changed against the run the site shows, and ``vv publish`` opens a pull
 request publishing the records (see :mod:`vv.publish`). ``vv release``, run by
 CI after that merges, makes the release of each published run that has none.
+``vv run --release-check`` runs the project's fixed pre-release set with the
+codes given and lists what got worse, failed or went missing against the
+newest published run (see :mod:`vv.release_check`).
 
 The project comes from the nearest ``vv.toml`` in the current directory or a
 parent, which names it as ``module:attribute``::
@@ -18,6 +21,7 @@ can live in that repository without being installed. Every option is required::
     vv compare --models all --libraries endf-b8.1 --codes code-a==1.2.0
     vv publish --models all --libraries endf-b8.1 --codes code-a==1.2.0
     vv release
+    vv run --release-check code-a@86ef200e
 """
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from . import publish as published
+from .release_check import ReleaseCheckError, release_check
 from .runner import ALL, Project, SelectionError, plan, run
 
 if sys.version_info >= (3, 11):
@@ -76,19 +81,34 @@ def _parser() -> argparse.ArgumentParser:
                        ("compare", "show what changed against the run the site shows"),
                        ("publish", "open a pull request publishing the records these codes have")):
         p = sub.add_parser(name, help=text, description=text)
-        p.add_argument("--models", nargs="+", required=True, metavar="MODEL",
+        # vv run --release-check takes its models, libraries and references from the project.
+        required = name != "run"
+        p.add_argument("--models", nargs="+", required=required, metavar="MODEL",
                        help=f"models to run, or '{ALL}' for every model on the libraries")
-        p.add_argument("--libraries", nargs="+", required=True, metavar="LIBRARY",
+        p.add_argument("--libraries", nargs="+", required=required, metavar="LIBRARY",
                        help="nuclear data libraries to run them on")
-        p.add_argument("--codes", nargs="+", required=True, metavar="CODE",
+        p.add_argument("--codes", nargs="+", required=required, metavar="CODE",
                        help="codes, each with an exact version or commit")
+        if name == "run":
+            p.add_argument("--release-check", nargs="+", metavar="CODE",
+                           help="run the project's fixed pre-release set with these codes and list what got "
+                                "worse, failed or went missing against the newest published run, instead of "
+                                "naming --models, --libraries and --codes")
     sub.add_parser("release", help="make the release of every published run that has none (run by CI)")
     return ap
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the ``vv`` command line; return the exit status."""
-    args = _parser().parse_args(argv)
+    ap = _parser()
+    args = ap.parse_args(argv)
+    if args.command == "run":
+        given = [f"--{n}" for n in ("models", "libraries", "codes") if getattr(args, n) is not None]
+        if args.release_check is not None and given:
+            ap.error(f"--release-check runs the project's own set: leave out {', '.join(given)}")
+        if args.release_check is None and len(given) < 3:
+            missing = [f"--{n}" for n in ("models", "libraries", "codes") if getattr(args, n) is None]
+            ap.error(f"the following arguments are required: {', '.join(missing)} (or --release-check CODE)")
     try:
         config = find_config(Path.cwd())
         if args.command == "release":
@@ -106,8 +126,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.command == "publish":
             print(published.publish(project, **kw).format())
             return 0
+        if args.release_check is not None:
+            result, report = release_check(project, args.release_check)
+            print()
+            print(report.format())
+            return 0 if result.ok and report.ok else 1
         result = run(project, **kw)
-    except (SelectionError, FileNotFoundError, published.PublishError) as e:
+    except (SelectionError, FileNotFoundError, published.PublishError, ReleaseCheckError) as e:
         print(f"vv: {e}", file=sys.stderr)
         return 2
     return 0 if result.ok else 1

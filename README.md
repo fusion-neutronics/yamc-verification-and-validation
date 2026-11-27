@@ -18,7 +18,9 @@ environment instead (see [Using the latest yamc](#using-the-latest-yamc)).
 
 ## Core Validation Before a Release
 
-Run this locally before releasing yamc or yamc-core (it is not run in CI). Build the core
+The release check (see [Checking a release](#checking-a-release)) is the main
+check before a release. This older, narrower comparison of core's own
+regression models is kept beside it. Run this locally before releasing yamc or yamc-core (it is not run in CI). Build the core
 checkout you intend to release into this environment, then compare Fe54, Fe56
 and Fe57 with fresh OpenMC results in four modes: neutron transport, coupled
 transport, D1S decay photons and material transmutation. It does not use
@@ -235,6 +237,47 @@ If the run included records not committed in your checkout, `vv publish` says
 so: they are on the branch, so remove them (or check out that branch) before
 pulling `main` once it merges.
 
+## Checking a release
+
+Before releasing yamc, run the release check on the commit you mean to release:
+
+```bash
+vv run --release-check yamc-cpu@<commit> yamc-gpu@<commit>
+```
+
+It runs a fixed set, every model on ENDF/B-VIII.1 at the particle counts in
+`yamc_verify/tasks.py` (`YamcProject.release_check`), with those codes and with
+OpenMC at the version the newest published run has. That run's OpenMC records
+usually exist already, so normally only yamc runs. Each yamc result is then
+graded against the published run's own OpenMC record of that item, so a grade
+can only move because yamc did, and compared with the grade the published run
+gives it, in the site's bands (Excellent, Good, Fair, Poor). It lists:
+
+- `worse`: the result dropped a band;
+- `fails`: the published run has a grade, this build has no record, and the
+  job that should have made it failed (its log is named);
+- `missing`: the published run has a grade and this build has none;
+- `better`, and `new` (nothing published to compare with), which are not
+  flagged.
+
+```text
+worse: 1
+  neutron/sphere endf-b8.1
+    yamc-cpu  Fe56  Excellent -> Good   chi2/N 1.21 -> 2.4
+
+584 graded results: 1 worse, 0 fails, 0 missing, 2 better, 0 new, 581 same
+1 flagged: review them before releasing (the check only reports; releasing stays your decision)
+```
+
+It exits with 1 when anything is flagged or a job failed, but it only reports:
+whether to release stays a human decision. It needs a published run to compare
+with (see [Comparing and publishing a run](#comparing-and-publishing-a-run)).
+Name only the backends to check; a backend the published run has no results
+for is all `new`. `vv plan --models all --libraries endf-b8.1 --codes
+openmc==<published version> yamc-cpu@<commit>` shows what it would run and
+roughly how long. The `YAMC_VERIFY_*` item variables narrow it as they narrow
+`vv run`, and the published items it then skips are listed as missing.
+
 ## Shared code (`yamc_verify/`)
 
 All the model logic lives in the `yamc_verify/` package. Runs are driven directly
@@ -256,7 +299,7 @@ from it (there are no notebooks):
   stored records belong to each code, and how a task runs in a code's environment.
 - `plan.py`: item discovery and record counting per task, for both runners.
 - `orchestrator.py`: the in-place runner behind `run_models.sh`.
-- `index_builder.py`: builds the site's data (`benchmarks-index.json` and the published records) from the published runs.
+- `index_builder.py`: builds the site's data (`benchmarks-index.json` and the published records) from the published runs. Its grading is also what the release check grades with.
 - `environments.py`: one Python environment per code version (`openmc==X`,
   `yamc==X`, `yamc@<commit>`); see [One environment per code version](#one-environment-per-code-version).
 
@@ -284,8 +327,12 @@ pip install "vv @ git+https://github.com/fusion-neutronics/yamc-verification-and
   publishing them, and the release archive of each published run (see
   [Comparing and publishing a run](#comparing-and-publishing-a-run)). A project
   says which records each code has with `Project.records`.
+- `vv.release_check`: the pre-release check (see
+  [Checking a release](#checking-a-release)). A project names its fixed set with
+  `Project.release_check` and grades its results with `Project.grades`.
 - `vv.cli`: the `vv plan`, `vv run`, `vv compare`, `vv publish` and `vv release`
-  commands, which find the project through the nearest `vv.toml`.
+  commands, and `vv run --release-check`, which find the project through the
+  nearest `vv.toml`.
 
 Its tests are in `packages/vv/tests/`.
 

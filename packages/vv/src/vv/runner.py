@@ -77,6 +77,42 @@ class Code:
         return self.environment_key or self.spec
 
 
+@dataclass(frozen=True)
+class Grade:
+    """How well one result agrees with its reference: a band, and the numbers behind it.
+
+    ``band`` is one of the project's :attr:`ReleaseCheck.bands`. ``note`` is
+    shown beside it by the release check, for example ``chi2/N 1.2``.
+    """
+
+    band: str
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class ReleaseCheck:
+    """The fixed set ``vv run --release-check`` runs before a release (see :mod:`vv.release_check`).
+
+    Attributes
+    ----------
+    models : list of str, or "all"
+        The models it runs.
+    libraries : list of str
+        The libraries it runs them on.
+    references : list of str
+        The names of the codes the others are graded against. The check runs
+        them at the version the newest published run has, and grades against
+        that run's own records of them.
+    bands : list of str
+        Every band :meth:`Project.grades` gives, best first.
+    """
+
+    models: Union[str, Sequence[str]]
+    libraries: Sequence[str]
+    references: Sequence[str]
+    bands: Sequence[str]
+
+
 @dataclass
 class Row:
     """One line of the plan and the display: the items one code files under one name.
@@ -165,6 +201,20 @@ class Project(abc.ABC):
     @abc.abstractmethod
     def command(self, job: Job, codes: Sequence[Code], python: Path) -> Command:
         """How to run ``job`` with ``python``, the interpreter of its code's environment."""
+
+    release_check: Optional[ReleaseCheck] = None
+    """The fixed set ``vv run --release-check`` runs, or ``None`` if the project has none."""
+
+    def grades(self, run) -> dict[tuple[str, str, str, str], Grade]:
+        """The grade of each result in ``run`` that has a reference to be graded against.
+
+        ``run`` is a :class:`vv.publish.Run`. Each key is the graded record's
+        ``(model, library, label, item)``. The records of the
+        :attr:`ReleaseCheck.references` codes are what the others are graded
+        against, so they have no grade of their own. Needed by the release
+        check, not by planning, running or publishing.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not grade its results")
 
     def records(self, model: str, library: str, code: Code) -> list[Path]:
         """The record of each item that ``code`` has on ``model`` and ``library``, from the stored records alone.

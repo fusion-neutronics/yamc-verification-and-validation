@@ -50,15 +50,16 @@ from .plotting import calculate_spectral_agreement, quality_from_chi2
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-_QUALITY_ORDER = ("Excellent", "Good", "Fair", "Poor")
+QUALITY_ORDER = ("Excellent", "Good", "Fair", "Poor")
+"""The grade bands, best first."""
 
 # results-dict scalar tallies: (means key, prefix for the published name)
 _SCALAR_KEYS = (("tallies", ""), ("n_scalars", "n:"), ("p_scalars", "p:"))
 
 
 def _worst_quality(qualities):
-    ranked = [q for q in qualities if q in _QUALITY_ORDER]
-    return max(ranked, key=_QUALITY_ORDER.index) if ranked else None
+    ranked = [q for q in qualities if q in QUALITY_ORDER]
+    return max(ranked, key=QUALITY_ORDER.index) if ranked else None
 
 
 # Electron-treatment suffixes on secondary-photon codes (openmc-led, yamc-cpu-ttb,
@@ -289,7 +290,7 @@ def _mismatch_key(cmp):
     chi2 = cmp.get("residual_reduced_chi_squared", cmp.get("reduced_chi_squared"))
     rd = cmp.get("max_tally_rel_diff_pct") or cmp.get("max_rel_diff_pct")
     return (
-        _QUALITY_ORDER.index(cmp["quality"]) if cmp.get("quality") in _QUALITY_ORDER else -1,
+        QUALITY_ORDER.index(cmp["quality"]) if cmp.get("quality") in QUALITY_ORDER else -1,
         chi2 if isinstance(chi2, (int, float)) and math.isfinite(chi2) else 0.0,
         rd if isinstance(rd, (int, float)) and math.isfinite(rd) else 0.0,
     )
@@ -310,12 +311,13 @@ def _distribution(values):
     }
 
 
-def _benchmarks(run, tasks_list, site=None):
-    """The benchmark entries of one published run, and how many records it has.
+def benchmarks(run, tasks_list, site=None, root=_REPO_ROOT):
+    """The benchmark entries of one run, each with its graded comparisons, and how many records it has.
 
-    Each record is the exact published bytes (read back from git if it has been
-    replaced since), filed in the site as ``records/<blob>.json`` when ``site``
-    is given.
+    Each record is the exact published bytes (read back from git under ``root``
+    if it has been replaced since), filed in the site as ``records/<blob>.json``
+    when ``site`` is given. The release check grades with this too
+    (:meth:`yamc_verify.project.YamcProject.grades`), so it grades as the site does.
     """
     by_key = {t.key: t for t in tasks_list}
     grouped: dict = {}
@@ -328,7 +330,7 @@ def _benchmarks(run, tasks_list, site=None):
             continue
         loaded, files = {}, {}
         for label, e in entries.items():
-            data = record_bytes(_REPO_ROOT, e)
+            data = record_bytes(root, e)
             record = json.loads(data)
             loaded[label] = (record["code_identity"], decode(record.get("results") or {}))
             files[label] = f"records/{e.blob}.json"
@@ -404,9 +406,9 @@ def build_index(runs=None, tasks_list=None, worst_n=15, site=None):
     runs = shown_runs(_REPO_ROOT) if runs is None else runs
     run = runs[0] if runs else None
     previous = runs[1] if len(runs) > 1 else None
-    records, n_simulations = _benchmarks(run, tasks_list, site) if run else ([], 0)
+    records, n_simulations = benchmarks(run, tasks_list, site) if run else ([], 0)
     if previous is not None:
-        before, _ = _benchmarks(previous, tasks_list)
+        before, _ = benchmarks(previous, tasks_list)
         was = {r["id"]: {c["code"]: {k: c.get(k) for k in _PREVIOUS_KEYS} for c in r["comparisons"]}
                for r in before}
         for r in records:
