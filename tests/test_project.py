@@ -201,3 +201,45 @@ def test_the_fixed_geometry_models_plan_their_cells():
     assert plan.discover_items(tasks.get_task("neutron/tokamak/endf-b8.1"), True) == list(tokamak.TALLY_CELLS)
     slab = tasks.get_task("neutron/multimaterial-slab/endf-b8.1")
     assert plan.discover_items(slab, False) == list(multimaterial_slab.TALLY_LAYERS)
+
+
+def _record(root, task_key, code, item, version, *, commit=None, reports=None):
+    task = tasks.get_task(task_key)
+    name = "openmc" if code.startswith("openmc") else "yamc"
+    ident = {"name": name, "version": reports or version, "commit": commit, "dirty": False,
+             "build_id": f"{reports or version}+g{commit or 'unknown'}"}
+    return save_record(root / task.cache_dir, task.library, code, item, {"x": 1},
+                       identity=ident, settings={"library": task.library})
+
+
+def test_records_belong_to_a_yamc_version_or_commit(tmp_path):
+    p = YamcProject()
+    p.root = tmp_path
+    old = _record(tmp_path, "neutron/sphere/endf-b8.1", "yamc-cpu", "Fe56", "0.23.0", commit="1" * 40)
+    new = _record(tmp_path, "neutron/sphere/endf-b8.1", "yamc-cpu", "Fe56", "0.24.0", commit="86ef200e" + "0" * 32)
+    _record(tmp_path, "neutron/sphere/endf-b8.1", "yamc-cpu", "H1", "0.23.0", commit="1" * 40)
+    assert p.records("neutron/sphere", "endf-b8.1", p.parse_code("yamc-cpu==0.24.0")) == [new]
+    assert p.records("neutron/sphere", "endf-b8.1", p.parse_code("yamc-cpu@86ef200e")) == [new]
+    assert len(p.records("neutron/sphere", "endf-b8.1", p.parse_code("yamc-cpu==0.23.0"))) == 2
+    assert old in p.records("neutron/sphere", "endf-b8.1", p.parse_code("yamc-cpu==0.23.0"))
+
+
+def test_openmc_references_belong_to_its_version_only_where_the_build_changed_them(tmp_path):
+    p = YamcProject()
+    p.root = tmp_path
+    neutron = _record(tmp_path, "neutron/sphere/endf-b8.1", "openmc", "Fe56", None)
+    photon_old = _record(tmp_path, "photon/sphere/endf-b8.1", "openmc", "Fe", None)
+    photon_new = _record(tmp_path, "photon/sphere/endf-b8.1", "openmc", "W", None, reports="0.16.1-dev0")
+    code = p.parse_code("openmc==0.16.1.dev0")
+    assert p.records("neutron/sphere", "endf-b8.1", code) == [neutron]
+    assert p.records("photon/sphere", "endf-b8.1", code) == [photon_new]
+    assert photon_old not in p.records("photon/sphere", "endf-b8.1", code)
+
+
+def test_publishing_needs_no_nuclear_data(tmp_path, monkeypatch):
+    monkeypatch.setenv(tasks.NUCLEAR_DATA_ENV, str(tmp_path / "absent"))
+    p = YamcProject()
+    p.root = tmp_path
+    _record(tmp_path, "neutron/sphere/endf-b8.1", "yamc-cpu", "Fe56", "0.24.0", commit="2" * 40)
+    run = vv.publish.collect(p, models=["neutron/sphere"], libraries=["endf-b8.1"], codes=["yamc-cpu==0.24.0"])
+    assert [(e.item, e.build_id) for e in run.entries] == [("Fe56", "0.24.0+g" + "2" * 40)]

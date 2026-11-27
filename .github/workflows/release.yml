@@ -1,0 +1,39 @@
+name: Release published runs
+
+# A publishing pull request (opened by `vv publish`) adds a run to
+# published.json. Once it merges, this tags the merge commit and attaches the
+# run's records to a GitHub release of that tag, as one archive: a frozen
+# snapshot that lets old runs be pruned from git later.
+on:
+  push:
+    branches: [main]
+    paths: [published.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-runs
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A record replaced after it was published is read back from history.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the vv package
+        run: pip install ./packages/vv
+
+      - name: Release every published run that has no release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: vv release

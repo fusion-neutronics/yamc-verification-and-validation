@@ -80,3 +80,8 @@ def test_a_malformed_project_reference_is_rejected(tmp_path):
     (tmp_path / "vv.toml").write_text('project = "no-colon"\n')
     with pytest.raises(ValueError, match="module:attribute"):
         cli.load_project(tmp_path / "vv.toml")
+
+
+def test_release_with_nothing_published_does_nothing(repo, capsys):
+    assert cli.main(["release"]) == 0
+    assert capsys.readouterr().out == ""

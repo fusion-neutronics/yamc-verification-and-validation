@@ -130,6 +130,9 @@ class Project(abc.ABC):
     """
 
     name: str = "verification"
+    root: Optional[Path] = None
+    """The repository the records live in, which comparing and publishing need.
+    ``vv`` sets it to the folder holding ``vv.toml`` when the project leaves it unset."""
 
     @abc.abstractmethod
     def models(self) -> list[str]:
@@ -162,6 +165,15 @@ class Project(abc.ABC):
     @abc.abstractmethod
     def command(self, job: Job, codes: Sequence[Code], python: Path) -> Command:
         """How to run ``job`` with ``python``, the interpreter of its code's environment."""
+
+    def records(self, model: str, library: str, code: Code) -> list[Path]:
+        """The record of each item that ``code`` has on ``model`` and ``library``, from the stored records alone.
+
+        One path per item and label: the record a run of ``code`` would use.
+        Needed by :mod:`vv.publish` (comparing and publishing), not by planning
+        or running.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not say which records each code has")
 
 
 @dataclass
@@ -269,13 +281,15 @@ def _names(kind: str, value, available: Sequence[str], problems: list[str]) -> l
     return [v for v in out if v in available]
 
 
-def select(project: Project, *, models, libraries, codes) -> Selection:
+def select(project: Project, *, models, libraries, codes, records_only: bool = False) -> Selection:
     """Check a request before anything runs; raise :class:`SelectionError` listing every problem.
 
     ``models`` is a list of model names or ``"all"``; ``libraries`` and ``codes``
     are lists. None has a default. Unknown models, libraries or codes, libraries
     whose data is missing, and codes that cannot be installed all stop it, with
-    a list of what is available.
+    a list of what is available. ``records_only`` is for work on the stored
+    records alone (comparing and publishing them): the libraries' data and the
+    codes' installability are then not needed, so not checked.
     """
     problems: list[str] = []
     known_models = list(project.models())
@@ -289,7 +303,7 @@ def select(project: Project, *, models, libraries, codes) -> Selection:
     chosen_libraries = _names("libraries", libraries, list(known_libraries), problems)
     for lib in list(chosen_libraries):
         why = known_libraries[lib]
-        if why is not None:
+        if why is not None and not records_only:
             problems.append(f"library {lib} is missing: {why}. Available: {usable}")
             chosen_libraries.remove(lib)
 
@@ -327,7 +341,7 @@ def select(project: Project, *, models, libraries, codes) -> Selection:
                 problems.append(f"library {lib} has none of the models {chosen_models}")
 
     for code in chosen_codes:
-        if code.check is not None and not code.is_ready():
+        if code.check is not None and not records_only and not code.is_ready():
             try:
                 code.check()
             except ValueError as e:

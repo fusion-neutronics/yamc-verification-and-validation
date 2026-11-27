@@ -189,6 +189,52 @@ python -m yamc_verify.run_task neutron/sphere/endf-b8.1      # one task, no disp
 
 The runs only write to the on-disk cache (the database the benchmark page reads).
 
+## Comparing and publishing a run
+
+A *run* is the record each item has for a set of codes: the yamc records of the
+named version or commit, and the OpenMC references the run used (any build's
+for neutron and transmutation, the named OpenMC version's for the photon
+families). Both commands work from the stored records alone, so they need no
+nuclear data and build no environment.
+
+`vv compare` shows what changed against the newest published run, the one the
+site shows. Each item is `new`, `missing`, `changed` (with its largest relative
+difference and where), `rerun` (a new record with the same results) or `same`;
+only the differences are listed:
+
+```bash
+vv compare --models all --libraries endf-b8.1 --codes openmc==0.16.1.dev0 yamc-cpu==0.24.0
+```
+
+`vv publish` takes the same arguments and opens a pull request publishing the
+run, normally once per core release:
+
+```bash
+vv publish --models all --libraries endf-b8.1 --codes openmc==0.16.1.dev0 yamc-cpu==0.24.0
+```
+
+It refuses records from a build with uncommitted changes, and a run whose
+records are exactly the newest published run's. The pull request's branch is
+made from `main` on `origin` without touching your checkout or branch. It holds:
+
+- the run's records, including any not committed yet;
+- `runs/<tag>.json`, the run's manifest: its codes, models and libraries, and
+  every record's path and git blob id, so the exact bytes can be read back from
+  git even after a record is replaced by a rerun of the same build;
+- `published.json`, the small file naming every published run, newest first.
+  The site shows the first two.
+
+The tag is `vv-<date>-<codes>`, for example
+`vv-2026-11-27-openmc-0.16.1.dev0-yamc-cpu-0.24.0`. When the pull request
+merges, the `Release published runs` workflow runs `vv release`: it tags the
+merge commit and makes a GitHub release of that tag with the run's records
+attached as `<tag>.tar.gz`. That release is the run's frozen snapshot, so old
+runs can be pruned from git later.
+
+If the run included records not committed in your checkout, `vv publish` says
+so: they are on the branch, so remove them (or check out that branch) before
+pulling `main` once it merges.
+
 ## Shared code (`yamc_verify/`)
 
 All the model logic lives in the `yamc_verify/` package. Runs are driven directly
@@ -205,9 +251,9 @@ from it (there are no notebooks):
   `run_all` and caches the results. This is what each run process executes.
 - `geometry.py`, `discovery.py`, `plotting.py`: shared geometry builders, item
   discovery, and generic spectrum-comparison plotting/metrics.
-- `project.py`: `verification()` and the project `vv plan` / `vv run` use:
-  the models, libraries and code names, which records count as done, and how a
-  task runs in a code's environment.
+- `project.py`: `verification()` and the project the `vv` commands use:
+  the models, libraries and code names, which records count as done, which
+  stored records belong to each code, and how a task runs in a code's environment.
 - `plan.py`: item discovery and record counting per task, for both runners.
 - `orchestrator.py`: the in-place runner behind `run_models.sh`.
 - `index_builder.py`: builds the `benchmarks-index.json` the web page reads.
@@ -234,8 +280,12 @@ pip install "vv @ git+https://github.com/fusion-neutronics/yamc-verification-and
   environment (`vv.Code`).
 - `vv.progress`, `vv.dashboard`: the progress events a run emits (to the file
   named by `VV_PROGRESS`) and the live display that follows them.
-- `vv.cli`: the `vv plan` and `vv run` commands, which find the project through
-  the nearest `vv.toml`.
+- `vv.publish`: the runs: comparing the records with the published run,
+  publishing them, and the release archive of each published run (see
+  [Comparing and publishing a run](#comparing-and-publishing-a-run)). A project
+  says which records each code has with `Project.records`.
+- `vv.cli`: the `vv plan`, `vv run`, `vv compare`, `vv publish` and `vv release`
+  commands, which find the project through the nearest `vv.toml`.
 
 Its tests are in `packages/vv/tests/`.
 
