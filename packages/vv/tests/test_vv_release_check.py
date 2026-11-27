@@ -7,6 +7,7 @@ by how far its value is from the reference's.
 """
 import io
 import json
+import math
 import os
 import subprocess
 import sys
@@ -258,3 +259,91 @@ def test_the_command_line_takes_the_codes_and_nothing_else(capsys):
     with pytest.raises(SystemExit):
         main(["run", "--models", "sphere"])
     assert "required: --libraries, --codes (or --release-check CODE)" in capsys.readouterr().err
+
+
+# --- grading by distance from fixed references (a measurement, another code's published values) ---
+
+
+class MeasuredProject(CheckProject):
+    """``foil`` on ``lib-a``: code-a against two fixed references, graded by distance, with no bands."""
+
+    release_check = vv.ReleaseCheck(models=vv.ALL, libraries=["lib-a"], references=[], tolerance=1e-9)
+
+    def models(self):
+        return ["foil"]
+
+    def parse_code(self, spec):
+        name, _, version = spec.partition("==")
+        if name != "code-a" or not version:
+            raise ValueError(f"cannot read code {spec!r}; codes: ['code-a']")
+        return vv.Code(spec, name, lambda: sys.executable, lambda: True)
+
+    def fixed_records(self, model, library):
+        return sorted((self.root / "fixed").glob("*/lib-a/*/*/*.json"))
+
+    def grades(self, run):
+        values = {}
+        for e in run.entries:
+            values[e.key] = decode(json.loads(publish.record_bytes(self.root, e))["results"])["flux"][1]
+        out = {}
+        for (model, library, label, item), value in values.items():
+            if label != "code-a":
+                continue
+            distances = {ref: abs(math.log(value / values[(model, library, ref, item)]))
+                         for ref in ("measurement", "other") if (model, library, ref, item) in values}
+            out[(model, library, label, item)] = vv.Grade(distances=distances)
+        return out
+
+
+def save_fixed(root, ref, item, value):
+    ident = {"name": ref, "version": "report", "commit": None, "dirty": None, "build_id": "report"}
+    save_record(root / "fixed" / ref, "lib-a", ref, item, {"flux": np.array([1.0, value])}, identity=ident)
+
+
+@pytest.fixture
+def measured(tmp_path, monkeypatch):
+    for k in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{k}_NAME", "tester")
+        monkeypatch.setenv(f"GIT_{k}_EMAIL", "tester@example.com")
+    remote, root = tmp_path / "remote.git", tmp_path / "repo"
+    subprocess.run(["git", "init", "--quiet", "--bare", "-b", "main", str(remote)], check=True)
+    subprocess.run(["git", "clone", "--quiet", str(remote), str(root)], check=True, capture_output=True)
+    git(root, "checkout", "--quiet", "-b", "main")
+    for item, measurement, other, value in (("A", 1.0, 1.02, 1.05), ("B", 1.0, 1.1, 1.0), ("C", 1.0, 0.95, 0.9)):
+        save_fixed(root, "measurement", item, measurement)
+        save_fixed(root, "other", item, other)
+        save(root, "foil", "code-a", item, "1.0", value)
+    git(root, "add", ".")
+    git(root, "commit", "--quiet", "-m", "records")
+    git(root, "push", "--quiet", "-u", "origin", "main")
+    git(root, "remote", "set-head", "origin", "main")
+    opened = []
+    monkeypatch.setattr(publish, "open_pull_request", lambda *a: opened.append(a[2]) or "https://example.com/pull/1")
+    publish.publish(MeasuredProject(root), models=vv.ALL, libraries=["lib-a"], codes=["code-a==1.0"])
+    git(root, "fetch", "--quiet", "origin")
+    git(root, "merge", "--quiet", "--ff-only", f"origin/{opened[0]}")
+    return root
+
+
+def test_moving_further_from_any_reference_is_flagged(measured):
+    save(measured, "foil", "code-a", "A", "1.1", 1.03)  # closer to both
+    save(measured, "foil", "code-a", "B", "1.1", 1.05)  # further from the measurement, closer to the other
+    save(measured, "foil", "code-a", "C", "1.1", 0.9)   # unchanged
+    save_fixed(measured, "measurement", "A", 2.0)       # re-read since publishing: must not move a grade
+    report = release_check.report(MeasuredProject(measured), ["code-a==1.1"])
+    by_item = {f.key[3]: f for f in report.findings}
+    assert {i: f.status for i, f in by_item.items()} == {"A": "better", "B": "worse", "C": "same"}
+    assert set(by_item["A"].toward) == {"measurement", "other"} and not by_item["A"].away
+    assert set(by_item["B"].away) == {"measurement"} and set(by_item["B"].toward) == {"other"}
+    text = report.format()
+    assert "further from measurement 0 -> 0.04879; closer to other 0.09531 -> 0.04652" in text
+    assert "1 flagged" in text
+
+
+def test_a_move_within_the_tolerance_is_not_flagged(measured):
+    project = MeasuredProject(measured)
+    project.release_check = vv.ReleaseCheck(models=vv.ALL, libraries=["lib-a"], references=[], tolerance=0.1)
+    save(measured, "foil", "code-a", "A", "1.1", 1.03)
+    save(measured, "foil", "code-a", "B", "1.1", 1.05)
+    save(measured, "foil", "code-a", "C", "1.1", 0.9)
+    assert all(f.status == "same" for f in release_check.report(project, ["code-a==1.1"]).findings)

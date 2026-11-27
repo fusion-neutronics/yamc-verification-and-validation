@@ -79,14 +79,19 @@ class Code:
 
 @dataclass(frozen=True)
 class Grade:
-    """How well one result agrees with its reference: a band, and the numbers behind it.
+    """How one result agrees with its references: a band, its distance from each, and the numbers behind them.
 
-    ``band`` is one of the project's :attr:`ReleaseCheck.bands`. ``note`` is
-    shown beside it by the release check, for example ``chi2/N 1.2``.
+    ``band`` is one of the project's :attr:`ReleaseCheck.bands`, or ``None``
+    for a project that grades without bands. ``distances`` maps each reference
+    the result is compared with (``measurement``, say) to how far the result
+    is from it, smaller being closer, in a measure the project chooses; the
+    release check flags a result that moves further from any of them. ``note``
+    is shown beside it by the release check, for example ``chi2/N 1.2``.
     """
 
-    band: str
+    band: Optional[str] = None
     note: str = ""
+    distances: Mapping[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -103,19 +108,25 @@ class ReleaseCheck:
         The names of the codes the others are graded against. The check runs
         them at the version the newest published run has, and grades against
         that run's own records of them.
-    bands : list of str
-        Every band :meth:`Project.grades` gives, best first.
+    bands : list of str, optional
+        Every band :meth:`Project.grades` gives, best first; none for a
+        project that grades by distance from its references alone.
     environment : dict, optional
         Variables the check sets while it runs, ``None`` unsetting one, so
         that every check runs the same items whatever the caller's
         environment says.
+    tolerance : float, optional
+        How much further from a reference (see :attr:`Grade.distances`) a
+        result may move before the check flags it. 0, the default, flags any
+        increase.
     """
 
     models: Union[str, Sequence[str]]
     libraries: Sequence[str]
     references: Sequence[str]
-    bands: Sequence[str]
+    bands: Sequence[str] = ()
     environment: Mapping[str, Optional[str]] = field(default_factory=dict)
+    tolerance: float = 0.0
 
 
 @dataclass

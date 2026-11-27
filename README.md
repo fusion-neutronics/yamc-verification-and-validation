@@ -397,7 +397,12 @@ pip install "vv @ git+https://github.com/fusion-neutronics/yamc-verification-and
   `Project.fixed_records`.
 - `vv.release_check`: the pre-release check (see
   [Checking a release](#checking-a-release)). A project names its fixed set with
-  `Project.release_check` and grades its results with `Project.grades`.
+  `Project.release_check` and grades its results with `Project.grades`: in
+  bands (as here), or by each result's distance from its references
+  (`Grade.distances`, with no bands), in which case any result that moves
+  further from a reference than the check's tolerance is flagged. The
+  candidate is graded against the published run's own records of the
+  reference codes and of the fixed records.
 - `vv.cli`: the `vv plan`, `vv run`, `vv compare`, `vv publish` and `vv release`
   commands, and `vv run --release-check`, which find the project through the
   nearest `vv.toml`.
