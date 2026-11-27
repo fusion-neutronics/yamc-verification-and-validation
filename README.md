@@ -250,6 +250,28 @@ every library misses by the same amount, which points at the vessel model);
 the other spheres and further experiments are listed in
 fusion-neutronics/example-endf-to-transport-validation#1.
 
+### Evaluating your own ENDF file
+
+The spheres test one evaluation of one nuclide at a time, so they can test
+yours. `python -m yamc_verify.evaluate` runs a sphere once per evaluation of
+its sample nuclide and compares each with the measurement:
+
+```bash
+python -m yamc_verify.evaluate --sphere Al27 --neutron-file my-Al27.endf --label "my Al27" \
+    --compare endf-b8.1 tendl-2025
+```
+
+`--neutron-file` is any ENDF-6 neutron evaluation of the sample nuclide,
+processed with NJOY at 294 K (`njoy` on `PATH`) and cached by the file's sha256
+under `~/.cache/yamc-verification/oktavian/user/`, so a changed file is
+converted again. `--compare` adds published libraries by yamc keyword. Only the
+sample's neutron data changes between the curves: the vessel's neutron data and
+the photon data come from `--library` (ENDF/B-VIII.1 unless named) for every
+evaluation. It writes `oktavian_<sphere>.html`, the leakage spectra with the
+measurement and C/E below, and `oktavian_<sphere>.json`, with each evaluation's
+source, spectra and goodness of fit, into `--output-dir`, and prints the fit
+table. Nothing it writes is a record: the runs and the site are untouched.
+
 ## Comparing and publishing a run
 
 A *run* is the record each item has for a set of codes: the yamc records of the
