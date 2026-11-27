@@ -168,7 +168,7 @@ def _show(root: Path, ref: str, path: str) -> Optional[str]:
     return out.stdout.decode() if out.returncode == 0 else None
 
 
-def _record_bytes(root: Path, entry: Entry) -> bytes:
+def record_bytes(root: Path, entry: Entry) -> bytes:
     """The exact bytes of a published record: from the working tree if unchanged, else from git."""
     path = root / entry.path
     if path.exists():
@@ -293,7 +293,7 @@ def compare_runs(root: Path, run: Run, against: Optional[Run]) -> Comparison:
         elif n.blob == o.blob:
             changes.append(Change(key, "same", n, o))
         else:
-            before = decode(json.loads(_record_bytes(root, o)).get("results", {}))
+            before = decode(json.loads(record_bytes(root, o)).get("results", {}))
             after = decode(json.loads((root / n.path).read_bytes()).get("results", {}))
             diff, where = results_difference(before, after)
             changes.append(Change(key, "changed" if diff > 0 else "rerun", n, o, diff, where))
@@ -305,6 +305,12 @@ def _load_run(root: Path, summary: dict, ref: Optional[str] = None) -> Run:
     if text is None:
         raise PublishError(f"{summary['manifest']} is not on {ref}")
     return Run.from_manifest(json.loads(text))
+
+
+def shown_runs(root: Path | str) -> list[Run]:
+    """The runs the site shows: the newest :data:`SHOWN` in ``published.json``, newest first."""
+    root = Path(root).resolve()
+    return [_load_run(root, s) for s in published_runs(root)[:SHOWN]]
 
 
 def compare(project: Project, *, models, libraries, codes) -> Comparison:
@@ -448,7 +454,7 @@ def archive(root: Path | str, tag: str, out_dir: Path | str = ".") -> Path:
     out = Path(out_dir) / f"{tag}.tar.gz"
     with open(out, "wb") as f, gzip.GzipFile(filename="", mode="wb", fileobj=f, mtime=0) as gz, \
             tarfile.open(fileobj=gz, mode="w") as tar:
-        for name, data in [(manifest_path, manifest)] + [(e.path, _record_bytes(root, e)) for e in run.entries]:
+        for name, data in [(manifest_path, manifest)] + [(e.path, record_bytes(root, e)) for e in run.entries]:
             info = tarfile.TarInfo(f"{tag}/{name}")
             info.size, info.mode = len(data), 0o644
             tar.addfile(info, io.BytesIO(data))
@@ -482,4 +488,4 @@ def release(root: Path | str) -> list[str]:
 
 __all__ = ["Change", "Comparison", "Entry", "PublishError", "Published", "Run", "SHOWN", "archive", "blob_id",
            "collect", "compare", "compare_runs", "open_pull_request", "publish", "published_runs",
-           "release", "results_difference", "run_tag"]
+           "record_bytes", "release", "results_difference", "run_tag", "shown_runs"]

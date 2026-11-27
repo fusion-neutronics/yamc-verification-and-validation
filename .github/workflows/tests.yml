@@ -51,10 +51,12 @@ jobs:
           echo "${count} tests collected"
 
   index:
-    name: The cache must still build an index
+    name: The published runs must still build the site
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -64,24 +66,27 @@ jobs:
       - name: Install build deps
         run: pip install numpy pandas plotly ./packages/vv
 
-      # Most changes here are committed cache JSON, and the deploy's only real
-      # build step is this one. Without it a malformed or truncated result file
-      # merges green and takes the page down on main instead, where the failure
-      # is a deploy rather than a review comment.
-      - name: Build the index
-        run: python -m yamc_verify.index_builder --out /tmp/benchmarks-index.json
+      # Most changes here are committed records and published runs, and the
+      # deploy's only real build step is this one. Without it a malformed
+      # record or manifest merges green and takes the page down on main
+      # instead, where the failure is a deploy rather than a review comment.
+      - name: Build the site data
+        run: python -m yamc_verify.index_builder /tmp/site
 
-      - name: The index must describe something
+      - name: A published run must describe something
         shell: bash
         run: |
           python - <<'PY'
           import json, sys
-          index = json.load(open("/tmp/benchmarks-index.json"))
-          benchmarks = index.get("benchmarks") or []
+          index = json.load(open("/tmp/site/benchmarks-index.json"))
           unindexed = index.get("unindexed_cache_dirs") or []
-          print(f"{len(benchmarks)} benchmarks indexed")
-          if len(benchmarks) < 1:
-              sys.exit("::error::the index names no benchmarks")
+          if index["run"] is None:
+              print("no run is published yet")
+          else:
+              n = len(index.get("benchmarks") or [])
+              print(f"{index['run']['tag']}: {n} benchmarks indexed")
+              if n < 1:
+                  sys.exit("::error::the published run names no benchmarks")
           if unindexed:
               # A cache directory the task registry does not know about is
               # either a typo in a new path or a task that was removed and

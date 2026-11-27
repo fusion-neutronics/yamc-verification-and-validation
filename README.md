@@ -256,7 +256,7 @@ from it (there are no notebooks):
   stored records belong to each code, and how a task runs in a code's environment.
 - `plan.py`: item discovery and record counting per task, for both runners.
 - `orchestrator.py`: the in-place runner behind `run_models.sh`.
-- `index_builder.py`: builds the `benchmarks-index.json` the web page reads.
+- `index_builder.py`: builds the site's data (`benchmarks-index.json` and the published records) from the published runs.
 - `environments.py`: one Python environment per code version (`openmc==X`,
   `yamc==X`, `yamc@<commit>`); see [One environment per code version](#one-environment-per-code-version).
 
@@ -417,27 +417,32 @@ Python version.
 ## The benchmark database page (the site)
 
 The deployed site is a single standalone page, `web/benchmarks.html`, served as
-the root `index.html`. It reads a generated `benchmarks-index.json` and lets you
-filter every cached benchmark by simulation type / geometry / library / element /
-nuclide, with headline agreement stats. Clicking a row expands a detail view with
-the interactive model geometry, the flux-spectrum comparison plot, and the
-reaction-rate table, pulled live from the on-disk cache.
+the root `index.html`. It shows the newest run `published.json` names (see
+[Comparing and publishing a run](#comparing-and-publishing-a-run)), filterable by
+simulation type / geometry / library / element / nuclide, with headline
+agreement stats. Each grade that differs from the run before says what it was,
+and a tile counts them. Clicking a row expands a detail view with the
+interactive model geometry, the flux-spectrum comparison plot, and the
+reaction-rate table. Until a run is published the page says so and shows
+nothing else.
 
 The page is a pure viewer: it holds no results data, inlines its own CSS, and
-uses only relative paths. It never needs editing when results change; only its
-data does. When the cache changes, regenerate the index (and, on the published
-site, the copied cache) - the page itself is untouched:
+uses only relative paths. Its data is written by
 
 ```bash
-python -m yamc_verify.index_builder --out benchmarks-index.json
+python -m yamc_verify.index_builder _site
 ```
 
-CI (`.github/workflows/pages.yml`) is correspondingly minimal: it installs
-`numpy pandas plotly` and the shared `vv` package, generates the index, copies `benchmarks.html` (as the root
-`index.html`), `logo.png`, and `web/models/`, drops in the results cache, and
-publishes to GitHub Pages. Every push to `main` regenerates the index, so the
-published site always reflects the current cache. There is no MyST, Node, or
-`jupyter-book` involved.
+which writes `_site/benchmarks-index.json` and `_site/records/<blob>.json`, the
+exact published bytes of every record the detail views load (read back from git
+when a record has been replaced since it was published). Nothing is simulated,
+and records that are not in a published run do not appear: `vv compare` shows
+those.
+
+CI (`.github/workflows/pages.yml`) installs `numpy pandas plotly` and the shared
+`vv` package, copies `benchmarks.html` (as the root `index.html`), `logo.png` and
+`web/models/`, runs the index builder and publishes to GitHub Pages on every
+push to `main`. There is no MyST, Node, or `jupyter-book` involved.
 
 ### Serving it locally
 
@@ -451,10 +456,7 @@ source .venv/bin/activate
 # PORT=9000 ./serve_site.sh to pick a different port
 ```
 
-It uses the results cache in your working tree (`tasks/*/cache/*.json`) and
-regenerates `benchmarks-index.json` on each run. Because CI only sees committed
-files, the **deployed** site shows this data only if that cache is committed too
-(see [Results cache](#results-cache)).
+It shows the runs `published.json` names in your checkout, exactly as CI does.
 
 ## Troubleshooting
 
