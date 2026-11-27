@@ -8,4 +8,4 @@ openmc
 openmc_data>=2.4.0
 # The public package selects the matching compiled yamc-core wheel.
 # Keep the minimum aligned with the latest release used for validation.
-yamc>=0.24.0
+yamc>=0.26.0

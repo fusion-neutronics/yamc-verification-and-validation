@@ -9,7 +9,7 @@ Monte Carlo code, OpenMC.
 pip install -r requirements.txt
 ```
 
-This installs the public `yamc` package, 0.24.0 or newer, from PyPI. It brings
+This installs the public `yamc` package, 0.26.0 or newer, from PyPI. It brings
 in the matching `yamc-core` wheel. It also installs the shared `vv` package from
 `packages/vv/` (editable), which provides the `vv` command. Run it from the
 repository root, since the requirements name `packages/vv` by a relative path.
