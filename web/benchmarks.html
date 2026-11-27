@@ -238,6 +238,8 @@
   .dl-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   td.num { font-variant-numeric: tabular-nums; }
   .dim { color: var(--muted); }
+  .run-line { font-size: 13px; color: var(--ink-2); }
+  .run-line code { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
   .item-cell { font-weight: 600; }
   .chip {
     display: inline-block; padding: 1px 7px; margin-right: 4px;
@@ -258,8 +260,9 @@
 <main>
   <header class="page">
     <h1>Benchmark database</h1>
-    <p>Every cached verification simulation, filterable by what it models, with
+    <p>Every simulation of the latest published run, filterable by what it models, with
        YAMC-vs-OpenMC agreement wherever a paired result exists.</p>
+    <p class="run-line" id="run-line" hidden></p>
   </header>
 
   <details class="callout">
@@ -438,6 +441,10 @@
   </div>
 
   <div class="load-error" id="load-error" hidden></div>
+  <div class="load-error" id="no-run" hidden>
+    <p>No run has been published yet. A run is published with <code>vv publish</code>
+       (see the repository README), and appears here once its pull request merges.</p>
+  </div>
   <div class="tooltip" id="tooltip"></div>
 </main>
 
@@ -725,6 +732,10 @@
     box.appendChild(tile("Median deviation", median === null ? "n/a" : fmtPct(median),
       median === null ? "no graded comparisons in selection"
                       : deviationLabel(graded) + " · p90 " + fmtPct(p90) + " · max " + fmtPct(max)));
+    if (index.previous_run) {
+      box.appendChild(tile("Grades changed", fmtInt(gradeChanges(pairs)),
+        "since the previous run"));
+    }
   }
 
   /* ---------- quality stacked bar ---------- */
@@ -902,7 +913,32 @@
         td.appendChild(document.createElement("br"));
         td.appendChild(el("span", "metrics dim", expectedText(c)));
       }
+      var w = wasText(r, c);
+      if (w) {
+        td.appendChild(document.createElement("br"));
+        td.appendChild(el("span", "metrics dim", w));
+      }
     };
+  }
+
+  /* The previous run's grade of a comparison (by its own code, treatment included),
+     shown only where it differs from this run's. */
+  function previousFor(rec, code) {
+    return rec.previous ? rec.previous[code] || null : null;
+  }
+  function wasText(rec, c) {
+    if (!index.previous_run) return "";
+    var prev = previousFor(rec, c.code);
+    if (!prev) return "new since the previous run";
+    return prev.quality && prev.quality !== band(c) ? "was " + prev.quality + " in the previous run" : "";
+  }
+  function gradeChanges(pairs) {
+    var n = 0;
+    pairs.forEach(function (p) {
+      var prev = previousFor(p.rec, p.cmp.code);
+      if (prev && prev.quality && prev.quality !== band(p.cmp)) n++;
+    });
+    return n;
   }
 
   function sortValue(rec, key) {
@@ -1776,6 +1812,21 @@
 
   function boot(idx) {
     index = idx;
+    if (!idx.run) {
+      $("no-run").hidden = false;
+      return;
+    }
+    var line = $("run-line");
+    line.appendChild(document.createTextNode("Run "));
+    line.appendChild(el("code", null, idx.run.tag));
+    line.appendChild(document.createTextNode(", published " + new Date(idx.run.date).toUTCString()
+      + ", with " + idx.run.codes.join(", ") + "."));
+    if (idx.previous_run) {
+      line.appendChild(document.createTextNode(" Grades are compared with the run before, "));
+      line.appendChild(el("code", null, idx.previous_run.tag));
+      line.appendChild(document.createTextNode(" (" + idx.previous_run.codes.join(", ") + ")."));
+    }
+    line.hidden = false;
     FILTER_FIELDS.forEach(function (f) {
       $("f-" + f).addEventListener("change", function (ev) {
         filters[f] = ev.target.value;
@@ -1803,9 +1854,6 @@
     var when = idx.generated_unix ? new Date(idx.generated_unix * 1000).toUTCString() : null;
     var bits = [];
     if (when) bits.push("Index generated " + when);
-    if (idx.yamc && idx.yamc.version) {
-      bits.push("yamc " + idx.yamc.build_id);
-    }
     bits.push("schema v" + idx.schema_version);
     foot.textContent = bits.join(" · ");
 
@@ -1824,10 +1872,8 @@
       box.hidden = false;
       box.appendChild(el("p", null, "Could not load benchmarks-index.json (" + err.message + ")."));
       var p = el("p", null, "The index is built by CI next to this page. To preview locally, run ");
-      p.appendChild(el("code", null, "python -m yamc_verify.index_builder --out benchmarks-index.json"));
-      p.appendChild(document.createTextNode(" beside this file and serve the directory over HTTP ("));
-      p.appendChild(el("code", null, "python -m http.server"));
-      p.appendChild(document.createTextNode("); fetch does not work from file://."));
+      p.appendChild(el("code", null, "./serve_site.sh"));
+      p.appendChild(document.createTextNode(", which builds the site as CI does and serves it over HTTP; fetch does not work from file://."));
       box.appendChild(p);
     });
 })();

@@ -1,29 +1,35 @@
-"""Emit the static ``index.json`` consumed by the verification website.
+"""Build the verification website's data from the published runs.
 
-Phase 1 of the website plan (issue #25): walk the on-disk results cache,
-compute per-benchmark OpenMC-vs-YAMC agreement, and write a single
-``index.json`` holding the headline aggregates plus one record per benchmark
-(unique family x geometry x library x nuclide/element) for client-side
-filtering. Agreement reuses :func:`yamc_verify.plotting.calculate_spectral_agreement`
+The site shows the newest run named in ``published.json`` and, beside it, the
+one before (see :mod:`vv.publish`). This writes, into the site folder:
+
+* ``benchmarks-index.json``: the headline aggregates plus one entry per
+  benchmark (unique family x geometry x library x nuclide/element) of the
+  newest run, for client-side filtering, with the previous run's grade of each
+  comparison under ``previous``;
+* ``records/<blob>.json``: the exact published bytes of each record the
+  detail views load, read back from git if a record was replaced since.
+
+Agreement reuses :func:`yamc_verify.plotting.calculate_spectral_agreement`
 (flux-weighted + reduced chi-squared, not a naive per-bin mean) and the
 transmutation step comparator, mirroring :mod:`yamc_verify.audit`.
 
 Two denominators are reported deliberately because they differ: ``simulations``
-counts every cached run (OpenMC-only runs included) while ``comparisons``
-counts only (benchmark, backend) pairs where both an OpenMC and a YAMC result
-exist. ``floats_compared`` totals the values examined per comparison:
-spectrum bins, shared scalar tallies, and per-timestep nuclide densities.
-The global deviation is published as a distribution (mean / median / p90 /
-max) plus a worst-N list and per-quality counts -- never a single number.
+counts every record of the run (OpenMC-only runs included) while
+``comparisons`` counts only (benchmark, backend) pairs where both an OpenMC and
+a YAMC result exist. ``floats_compared`` totals the values examined per
+comparison: spectrum bins, shared scalar tallies, and per-timestep nuclide
+densities. The global deviation is published as a distribution (mean / median
+/ p90 / max) plus a worst-N list and per-quality counts -- never a single number.
 
-Runs anywhere the repo is checked out (CI included): no yamc install or
-nuclear data needed, only the cached JSON.
+Nothing is simulated: it reads the committed records and git, so it runs in CI
+with no yamc install or nuclear data. With no published run the index names no
+benchmarks, and the page says so.
 
 Usage::
 
-    python -m yamc_verify.index_builder                 # writes ./index.json
-    python -m yamc_verify.index_builder --out _build/html/index.json
-    python -m yamc_verify.index_builder --pretty        # indented (debugging)
+    python -m yamc_verify.index_builder _site            # writes _site/benchmarks-index.json and _site/records/
+    python -m yamc_verify.index_builder _site --pretty   # indented (debugging)
 """
 from __future__ import annotations
 
@@ -35,9 +41,8 @@ from collections import Counter
 from pathlib import Path
 
 import numpy as np
-from vv.records import decode, iter_records
-
-from cache_utils import code_identity
+from vv.publish import record_bytes, shown_runs
+from vv.records import decode
 
 from . import tasks as _tasks
 from .discovery import element_from_nuclide
@@ -81,11 +86,6 @@ def _jsonable(obj):
     if isinstance(obj, float) and not math.isfinite(obj):
         return None
     return obj
-
-
-def _latest(lib_dir: Path, code: str, key: str):
-    """``(path, record)`` of the newest readable record of one item, or ``None``."""
-    return next(iter_records(lib_dir.parent, lib_dir.name, code, key), None)
 
 
 def _spectrum_pairs(results):
@@ -310,95 +310,115 @@ def _distribution(values):
     }
 
 
-def build_index(tasks_list=None, worst_n=15):
-    """Walk the cache for every registered task and build the index dict."""
-    tasks_list = tasks_list or _tasks.all_tasks()
-    try:
-        ident = code_identity("yamc")
-        installed = {"version": ident["version"], "build_id": ident["build_id"]}
-    except Exception:
-        installed = None  # yamc not installed (e.g. CI); the records are enough
+def _benchmarks(run, tasks_list, site=None):
+    """The benchmark entries of one published run, and how many records it has.
 
-    records = []
-    unreadable = []
-    n_simulations = 0
-    indexed_lib_dirs = set()
-
-    for task in tasks_list:
-        lib_dir = _REPO_ROOT / task.cache_dir / task.library
-        indexed_lib_dirs.add(lib_dir)
-        if not lib_dir.is_dir():
+    Each record is the exact published bytes (read back from git if it has been
+    replaced since), filed in the site as ``records/<blob>.json`` when ``site``
+    is given.
+    """
+    by_key = {t.key: t for t in tasks_list}
+    grouped: dict = {}
+    for e in run.entries:
+        grouped.setdefault((f"{e.model}/{e.library}", e.item), {})[e.label] = e
+    out, n_records = [], 0
+    for (task_key, key), entries in sorted(grouped.items()):
+        task = by_key.get(task_key)
+        if task is None:
             continue
-        # <library>/<code>/<item>/<build_id>.json; the newest record of each
-        # item is the one shown.
-        code_items = {}
-        for code_dir in sorted(p for p in lib_dir.iterdir() if p.is_dir()):
-            items = {d.name for d in code_dir.iterdir() if d.is_dir() and any(d.glob("*.json"))}
-            if items:
-                code_items[code_dir.name] = items
-        all_keys = sorted(set().union(*code_items.values(), set()))
-        for key in all_keys:
-            loaded = {}
-            paths = {}
-            for code, items in code_items.items():
-                if key not in items:
-                    continue
-                newest = _latest(lib_dir, code, key)
-                if newest is None:
-                    unreadable.append((lib_dir / code / key).relative_to(_REPO_ROOT).as_posix())
-                    continue
-                path, record = newest
-                loaded[code] = (record["code_identity"], decode(record.get("results") or {}))
-                paths[code] = path
-            if not loaded:
+        loaded, files = {}, {}
+        for label, e in entries.items():
+            data = record_bytes(_REPO_ROOT, e)
+            record = json.loads(data)
+            loaded[label] = (record["code_identity"], decode(record.get("results") or {}))
+            files[label] = f"records/{e.blob}.json"
+            if site is not None:
+                path = Path(site) / files[label]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+        n_records += len(loaded)
+        comparisons = []
+        # Pair each OpenMC reference with the YAMC backends that share its
+        # electron-treatment suffix (openmc-led vs yamc-cpu-led, ...). Codes
+        # without a suffix form the "" group, so every other family is
+        # unchanged. The treatment (or None) is carried on each comparison.
+        by_treatment: dict = {}
+        for code in loaded:
+            base, treatment = _split_treatment(code)
+            by_treatment.setdefault(treatment, {})[base] = code
+        element = key if task.item_kind == "element" else element_from_nuclide(key)
+        for treatment in sorted(by_treatment):
+            group = by_treatment[treatment]
+            ref = group.get("openmc")
+            if ref is None:
                 continue
-            n_simulations += len(loaded)
-            comparisons = []
-            # Pair each OpenMC reference with the YAMC backends that share its
-            # electron-treatment suffix (openmc-led vs yamc-cpu-led, ...). Codes
-            # without a suffix form the "" group, so every other family is
-            # unchanged. The treatment (or None) is carried on each comparison.
-            by_treatment: dict = {}
-            for code in loaded:
-                base, treatment = _split_treatment(code)
-                by_treatment.setdefault(treatment, {})[base] = code
-            element = key if task.item_kind == "element" else element_from_nuclide(key)
-            for treatment in sorted(by_treatment):
-                group = by_treatment[treatment]
-                ref = group.get("openmc")
-                if ref is None:
+            _, omc_res = loaded[ref]
+            for base in sorted(group):
+                if base == "openmc":
                     continue
-                _, omc_res = loaded[ref]
-                for base in sorted(group):
-                    if base == "openmc":
-                        continue
-                    code = group[base]
-                    y_ident, y_res = loaded[code]
-                    cmp = _compare(task, omc_res, y_res, element=element)
-                    if cmp is not None:
-                        comparisons.append({
-                            "code": code,
-                            "treatment": treatment or None,
-                            "yamc_version": y_ident.get("version"),
-                            "yamc_build": y_ident.get("build_id"),
-                            "openmc_build": loaded[ref][0].get("build_id"),
-                            **cmp,
-                        })
-            records.append({
-                "id": f"{task.family}/{task.geometry}/{task.library}/{key}",
-                "task": task.key,
-                "family": task.family,
-                "geometry": task.geometry,
-                "library": task.library,
-                "item": key,
-                "item_kind": task.item_kind,
-                "element": element,
-                "codes": sorted(loaded),
-                "files": {
-                    c: paths[c].relative_to(_REPO_ROOT).as_posix() for c in loaded
-                },
-                "comparisons": comparisons,
-            })
+                code = group[base]
+                y_ident, y_res = loaded[code]
+                cmp = _compare(task, omc_res, y_res, element=element)
+                if cmp is not None:
+                    comparisons.append({
+                        "code": code,
+                        "treatment": treatment or None,
+                        "yamc_version": y_ident.get("version"),
+                        "yamc_build": y_ident.get("build_id"),
+                        "openmc_build": loaded[ref][0].get("build_id"),
+                        **cmp,
+                    })
+        out.append({
+            "id": f"{task.family}/{task.geometry}/{task.library}/{key}",
+            "task": task.key,
+            "family": task.family,
+            "geometry": task.geometry,
+            "library": task.library,
+            "item": key,
+            "item_kind": task.item_kind,
+            "element": element,
+            "codes": sorted(loaded),
+            "files": files,
+            "comparisons": comparisons,
+        })
+    return out, n_records
+
+
+# What the page shows of a comparison in the previous run, beside the latest.
+_PREVIOUS_KEYS = ("quality", "reduced_chi_squared", "residual_reduced_chi_squared",
+                  "weighted_avg_rel_diff_pct", "max_rel_diff_pct", "max_tally_rel_diff_pct", "yamc_build")
+
+
+def _run_summary(run):
+    return None if run is None else {"tag": run.tag, "date": run.date, "codes": run.codes,
+                                     "models": run.models, "libraries": run.libraries}
+
+
+def build_index(runs=None, tasks_list=None, worst_n=15, site=None):
+    """The index of the newest published run, with the previous run's grades beside it.
+
+    ``runs`` defaults to the runs the site shows (:func:`vv.publish.shown_runs`).
+    With no published run the index names no benchmarks.
+    """
+    tasks_list = tasks_list or _tasks.all_tasks()
+    runs = shown_runs(_REPO_ROOT) if runs is None else runs
+    run = runs[0] if runs else None
+    previous = runs[1] if len(runs) > 1 else None
+    records, n_simulations = _benchmarks(run, tasks_list, site) if run else ([], 0)
+    if previous is not None:
+        before, _ = _benchmarks(previous, tasks_list)
+        was = {r["id"]: {c["code"]: {k: c.get(k) for k in _PREVIOUS_KEYS} for c in r["comparisons"]}
+               for r in before}
+        for r in records:
+            r["previous"] = was.get(r["id"])
+        prev_flat = [c for r in before for c in r["comparisons"]]
+        previous_summary = {**_run_summary(previous),
+                            "benchmarks": len(before), "comparisons": len(prev_flat),
+                            "quality_counts": dict(Counter(c["quality"] for c in prev_flat if c.get("quality"))),
+                            "only_in_previous": sorted({r["id"] for r in before} - {r["id"] for r in records})}
+    else:
+        previous_summary = None
+    indexed_lib_dirs = {_REPO_ROOT / t.cache_dir / t.library for t in tasks_list}
 
     # Cache library dirs no registered task covers (e.g. data landing before
     # its task exists) -- reported, never silently dropped.
@@ -418,9 +438,10 @@ def build_index(tasks_list=None, worst_n=15):
     graded = flat
     worst = sorted(graded, key=lambda rc: _mismatch_key(rc[1]), reverse=True)[:worst_n]
     index = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_unix": int(time.time()),
-        "yamc": installed,
+        "run": _run_summary(run),
+        "previous_run": previous_summary,
         "totals": {
             "simulations": n_simulations,
             "benchmarks": len(records),
@@ -462,29 +483,34 @@ def build_index(tasks_list=None, worst_n=15):
         },
         "benchmarks": records,
         "unindexed_cache_dirs": unindexed,
-        "unreadable_files": unreadable,
     }
     return _jsonable(index)
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Build index.json from the results cache.")
-    ap.add_argument("--out", default="index.json", help="output path (default: ./index.json)")
-    ap.add_argument("--worst", type=int, default=15, help="length of the worst-N list")
+    ap = argparse.ArgumentParser(description="Build the site's index and records from the published runs.")
+    ap.add_argument("site", help="folder to write benchmarks-index.json and records/ into")
     ap.add_argument("--pretty", action="store_true", help="indent the JSON (for debugging)")
     args = ap.parse_args(argv)
 
-    index = build_index(worst_n=args.worst)
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    site = Path(args.site)
+    site.mkdir(parents=True, exist_ok=True)
+    index = build_index(site=site)
+    out = site / "benchmarks-index.json"
     with out.open("w") as f:
         if args.pretty:
             json.dump(index, f, indent=1, allow_nan=False)
         else:
             json.dump(index, f, separators=(",", ":"), allow_nan=False)
 
-    t = index["totals"]
     print(f"wrote {out} ({out.stat().st_size / 1024:.0f} kB)")
+    if index["run"] is None:
+        print("  no run is published yet (see vv publish): the page says so")
+        return 0
+    t = index["totals"]
+    print(f"  run:              {index['run']['tag']}")
+    if index["previous_run"]:
+        print(f"  previous run:     {index['previous_run']['tag']}")
     print(f"  simulations:      {t['simulations']}")
     print(f"  benchmarks:       {t['benchmarks']} ({t['benchmarks_compared']} with a comparison)")
     print(f"  comparisons:      {t['comparisons']}")
@@ -494,10 +520,8 @@ def main(argv=None):
         print(f"  flux-weighted rel diff %: median {dist['median']:.2f}, "
               f"p90 {dist['p90']:.2f}, max {dist['max']:.2f}")
     print(f"  quality: {index['agreement']['quality_counts']}")
-    for msg, items in (("unindexed cache dirs", index["unindexed_cache_dirs"]),
-                       ("unreadable cache files", index["unreadable_files"])):
-        if items:
-            print(f"  WARNING {msg}: {items}")
+    if index["unindexed_cache_dirs"]:
+        print(f"  WARNING unindexed cache dirs: {index['unindexed_cache_dirs']}")
     return 0
 
 
