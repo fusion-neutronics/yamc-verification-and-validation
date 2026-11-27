@@ -182,7 +182,10 @@ def test_a_record_missing_from_the_new_run_is_listed(repo, prs):
 
 
 def test_dirty_records_are_refused(repo, prs):
-    save(repo, "Fe56", "1.0", 2.5, dirty=True)
+    path = save(repo, "Fe56", "1.0", 2.5, dirty=True)
+    record = json.loads(path.read_text())
+    record["run"]["date"] = "2999-01-01T00:00:00+00:00"  # newer than the clean record, not a tie
+    path.write_text(json.dumps(record))
     with pytest.raises(publish.PublishError, match="uncommitted changes"):
         publish.publish(RecordsProject(repo), codes=["code-a==1.0"], **KW)
     assert not prs
