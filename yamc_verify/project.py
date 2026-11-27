@@ -1,4 +1,4 @@
-"""``verification()``: run named yamc and OpenMC versions over models and libraries.
+"""``verification()`` and ``validation()``: run named code versions over models and libraries.
 
 This is the yamc project for the shared ``vv`` package: it says which models
 and libraries exist, how a code is named, and how its environment is built (one
@@ -190,6 +190,16 @@ class YamcProject(vv.Project):
             environments._core_dir(self.core_dir), env.ref)
         return lambda r: (r.get("code_identity", {}).get("commit") or "").startswith(commit)
 
+    def fixed_records(self, model: str, library: str) -> list[Path]:
+        """The measurement records of a validation model, which belong to every run of it."""
+        task = tasks.get_task(f"{model}/{library}")
+        if not task.validation:
+            return []
+        from .families import oktavian
+
+        folder = oktavian.measurement_dir(task, self.root)
+        return sorted(folder.glob("*.json")) if folder.is_dir() else []
+
     def records(self, model: str, library: str, code: vv.Code) -> list[Path]:
         """The newest record of each stored item that belongs to ``code`` (see :meth:`_accepts`)."""
         task = tasks.get_task(f"{model}/{library}")
@@ -246,15 +256,33 @@ PROJECT = YamcProject()
 """The project ``vv.toml`` names, with the core checkout from ``$YAMC_CORE_ROOT`` or ``../core``."""
 
 
-def verification(*, models, libraries, codes) -> vv.RunResult:
-    """Run the models on the libraries with each code, in its own environment, with live progress.
+def _models(models, validation: bool) -> list[str] | object:
+    """``models`` checked to be all verification models, or all validation ones; ``"all"`` is every one of them."""
+    kind = [m for m in PROJECT.models()
+            if any(t.validation == validation for t in tasks.all_tasks() if t.key.rsplit("/", 1)[0] == m)]
+    if isinstance(models, str) and models == vv.ALL:
+        return kind
+    if models is None or isinstance(models, str):
+        return models  # vv reports the missing or single-string argument
+    other = [m for m in models if m in PROJECT.models() and m not in kind]
+    if other:
+        raise vv.SelectionError(
+            f"{other} {'are' if len(other) > 1 else 'is'} not {'validation' if validation else 'verification'} "
+            f"model(s); use {'verification' if validation else 'validation'}() for them. "
+            f"{'Validation' if validation else 'Verification'} models: {kind}")
+    return models
 
-    Every argument is required: ``models`` (a list of names, or ``"all"``),
-    ``libraries`` and ``codes`` (lists, see the module docstring). Anything
-    unknown or missing stops it before anything runs, listing what is
-    available. Returns the plan it ran and the jobs that failed.
+
+def verification(*, models, libraries, codes) -> vv.RunResult:
+    """Run the verification models on the libraries with each code, in its own environment, with live progress.
+
+    Every argument is required: ``models`` (a list of names, or ``"all"`` for
+    every model compared with OpenMC), ``libraries`` and ``codes`` (lists, see
+    the module docstring). Anything unknown or missing stops it before
+    anything runs, listing what is available. Returns the plan it ran and the
+    jobs that failed.
     """
-    return vv.run(PROJECT, models=models, libraries=libraries, codes=codes)
+    return vv.run(PROJECT, models=_models(models, False), libraries=libraries, codes=codes)
 
 
 def verification_plan(*, models, libraries, codes) -> vv.Plan:
@@ -262,4 +290,20 @@ def verification_plan(*, models, libraries, codes) -> vv.Plan:
 
     Takes the same required arguments; builds no environment and runs nothing.
     """
-    return vv.plan(PROJECT, models=models, libraries=libraries, codes=codes)
+    return vv.plan(PROJECT, models=_models(models, False), libraries=libraries, codes=codes)
+
+
+def validation(*, models, libraries, codes) -> vv.RunResult:
+    """Run the experiment validation models (the OKTAVIAN spheres) with each code.
+
+    The same required arguments as :func:`verification`, with ``"all"`` meaning
+    every model compared with a measurement. The measurement is part of every
+    run of a validation model (:meth:`YamcProject.fixed_records`), so only the
+    codes are named, for example ``codes=["yamc-cpu==0.28.0"]``.
+    """
+    return vv.run(PROJECT, models=_models(models, True), libraries=libraries, codes=codes)
+
+
+def validation_plan(*, models, libraries, codes) -> vv.Plan:
+    """What :func:`validation` would run, what already has records and a rough time."""
+    return vv.plan(PROJECT, models=_models(models, True), libraries=libraries, codes=codes)

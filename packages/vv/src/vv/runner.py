@@ -166,6 +166,15 @@ class Project(abc.ABC):
     def command(self, job: Job, codes: Sequence[Code], python: Path) -> Command:
         """How to run ``job`` with ``python``, the interpreter of its code's environment."""
 
+    def fixed_records(self, model: str, library: str) -> list[Path]:
+        """Records that come from no code, a measurement say, and belong to every run of ``model`` on ``library``.
+
+        Comparing and publishing include them beside the codes' records,
+        filed under their own name (each record's ``code``), whenever a code
+        in the run runs the model. Default: none.
+        """
+        return []
+
     def records(self, model: str, library: str, code: Code) -> list[Path]:
         """The record of each item that ``code`` has on ``model`` and ``library``, from the stored records alone.
 

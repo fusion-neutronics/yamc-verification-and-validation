@@ -258,3 +258,22 @@ def test_run_tags_are_unique():
     assert publish.run_tag(["openmc==0.16.1.dev0", "yamc-cpu@86ef200e"], "2026-11-27", set()) == \
         "vv-2026-11-27-openmc-0.16.1.dev0-yamc-cpu-g86ef200e"
     assert publish.run_tag(["a==1"], "2026-11-27", {"vv-2026-11-27-a-1"}) == "vv-2026-11-27-a-1.2"
+
+
+def test_fixed_records_are_part_of_the_run_and_published_with_it(repo, prs):
+    """A measurement, say: no code makes it, every run of the model carries it."""
+    measured = save_record(repo / "measured", "lib-a", "measurement", "Fe56", {"flux": np.array([1.0, 2.1])},
+                           identity={"name": "measurement", "version": "report-1", "build_id": "report-1"})
+
+    class WithMeasurement(RecordsProject):
+        def fixed_records(self, model, library):
+            return [measured]
+
+    project = WithMeasurement(repo)
+    run = publish.collect(project, codes=["code-a==1.0"], **KW)
+    assert [(e.code, e.item) for e in run.entries] == [("code-a", "Fe56"), ("code-a", "H1"), ("measurement", "Fe56")]
+    assert run.code_names == ["code-a", "measurement"]
+    publish.publish(project, codes=["code-a==1.0"], **KW)
+    merge(repo, prs[0]["branch"])
+    by_key = {c.key[2:]: c.status for c in publish.compare(project, codes=["code-a==1.0"], **KW).changes}
+    assert by_key == {("code-a", "Fe56"): "same", ("code-a", "H1"): "same", ("measurement", "Fe56"): "same"}
