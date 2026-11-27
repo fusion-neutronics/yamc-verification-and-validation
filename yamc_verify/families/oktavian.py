@@ -57,8 +57,8 @@ none comes back. It agrees with the void-shell track-length estimate the
 example repository used to within 0.015% in every bin holding more than 0.1%
 of the leakage, on both spheres, at 10 million histories.
 
-yamc's GPU transport has no surface or photon tallies yet, so the task runs on
-the CPU only. The comparison is not graded: the site shows C/E per bin,
+yamc's GPU transport refuses surface tallies (fusion-neutronics/yamc-and-yani#104),
+so the task runs on the CPU only. The comparison is not graded: the site shows C/E per bin,
 chi2/N with experimental and Monte Carlo errors in quadrature, the integral
 C/E and the rms of ln(C/E), and the release check leaves it out.
 
@@ -534,7 +534,7 @@ def run_all(task: Task, backends=None, cache_dir: str = "cache"):
         per = {}
         for compute in b.computes:
             if compute != "cpu":
-                print(f"  {item}: yamc-{compute} has no surface or photon tallies; the task runs on the CPU only")
+                print(f"  {item}: yamc-{compute} refuses surface tallies (yamc-and-yani#104); the task runs on the CPU only")
                 continue
             try:
                 per[f"yamc-{compute}"] = run_step(
