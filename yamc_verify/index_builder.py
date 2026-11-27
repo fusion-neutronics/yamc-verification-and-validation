@@ -311,7 +311,7 @@ def _distribution(values):
     }
 
 
-def benchmarks(run, tasks_list, site=None, root=_REPO_ROOT):
+def benchmarks(run, tasks_list, site=None, root=None):
     """The benchmark entries of one run, each with its graded comparisons, and how many records it has.
 
     Each record is the exact published bytes (read back from git under ``root``
@@ -319,6 +319,7 @@ def benchmarks(run, tasks_list, site=None, root=_REPO_ROOT):
     when ``site`` is given. The release check grades with this too
     (:meth:`yamc_verify.project.YamcProject.grades`), so it grades as the site does.
     """
+    root = _REPO_ROOT if root is None else root
     by_key = {t.key: t for t in tasks_list}
     grouped: dict = {}
     for e in run.entries:
