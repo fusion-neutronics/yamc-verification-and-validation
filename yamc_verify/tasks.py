@@ -197,7 +197,7 @@ _reg(key="transmutation/material-flux-spectrum/endf-b8.1",
 
 # ---- validation: OKTAVIAN spheres (nuclide; against the measurement) -------
 # The measurement is the reference, so OpenMC does not run. yamc's GPU
-# transport has no surface or photon tallies yet, so only the CPU runs.
+# transport refuses surface tallies (yamc-and-yani#104), so only the CPU runs.
 _reg(key="oktavian/sphere/endf-b8.1", notebook="tasks/oktavian/sphere/endf-b8.1.ipynb",
      family="oktavian", geometry="sphere", library="endf-b8.1", label="OKTAVIAN sphere",
      item_kind="nuclide", codes=("yamc-cpu",), caches_yamc=True, particles=10_000_000)
