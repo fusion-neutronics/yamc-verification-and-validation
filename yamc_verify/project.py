@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Sequence
 
 import vv
-from vv.records import build_id
+from vv.records import build_id, cached_items, find_record
 
 from cache_utils import accept_old_cache
 
@@ -64,6 +64,7 @@ class YamcProject(vv.Project):
     """The models, libraries and codes of yamc verification, for :mod:`vv`."""
 
     name = "yamc verification"
+    root = REPO_ROOT
 
     def __init__(self, core_dir: Path | str | None = None):
         self.core_dir = core_dir
@@ -171,6 +172,37 @@ class YamcProject(vv.Project):
             return ci.get("commit") == commit and not ci.get("dirty")
         return lambda label: {"accept": accept_commit}
 
+    def _accepts(self, task: tasks.Task, code: vv.Code):
+        """Which stored records belong to ``code``, judged from the records alone, or ``None`` for any.
+
+        yamc: its version, or its commit. OpenMC: any build's reference with
+        matching settings, except the families whose references must come from
+        the named OpenMC version (see :data:`OPENMC_BUILD_KEYED_FAMILIES`).
+        """
+        env = _environment_spec(code)
+        if code.name == "openmc":
+            if task.family not in OPENMC_BUILD_KEYED_FAMILIES:
+                return None
+            return lambda r: _same_version(r.get("code_identity", {}).get("version"), env.ref)
+        if env.kind == "release":
+            return lambda r: r.get("code_identity", {}).get("version") == env.ref
+        commit = env.ref if re.fullmatch(r"[0-9a-f]{7,40}", env.ref) else environments.resolve_commit(
+            environments._core_dir(self.core_dir), env.ref)
+        return lambda r: (r.get("code_identity", {}).get("commit") or "").startswith(commit)
+
+    def records(self, model: str, library: str, code: vv.Code) -> list[Path]:
+        """The newest record of each stored item that belongs to ``code`` (see :meth:`_accepts`)."""
+        task = tasks.get_task(f"{model}/{library}")
+        cache_dir = Path(self.root) / task.cache_dir
+        accept = self._accepts(task, code)
+        out = []
+        for label in plan.real_codes([self._label(task, code)], task):
+            for item in cached_items(cache_dir, library, label):
+                found = find_record(cache_dir, library, label, item, settings={"library": library}, accept=accept)
+                if found is not None:
+                    out.append(found[0])
+        return out
+
     def rows(self, model: str, library: str, code: vv.Code, codes: Sequence[vv.Code]) -> list[vv.Row]:
         """The items of one task for ``code``, how many have a record it accepts, and earlier times."""
         task = tasks.get_task(f"{model}/{library}")
@@ -194,6 +226,20 @@ class YamcProject(vv.Project):
             "PYTHONPATH": os.pathsep.join([str(VV_SRC), str(REPO_ROOT)]),
         }
         return vv.Command(argv, env, cwd=REPO_ROOT)
+
+
+def _same_version(reported, version: str) -> bool:
+    """Whether the version an executable reports (``0.16.1-dev0``) is the package version (``0.16.1.dev0``)."""
+    if reported is None:
+        return False
+    try:
+        from packaging.version import InvalidVersion, Version
+    except ImportError:
+        return str(reported) == version
+    try:
+        return Version(str(reported)) == Version(version)
+    except InvalidVersion:
+        return str(reported) == version
 
 
 PROJECT = YamcProject()
