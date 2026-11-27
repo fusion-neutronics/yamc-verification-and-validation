@@ -232,7 +232,8 @@ all` runs both kinds.
   estimate it replaces to within 0.015% in every bin holding more than 0.1% of
   the leakage, on both spheres. The target's gammas are transported in a
   separate photon-only run and added to the photon leakage.
-- **CPU only**: yamc's GPU transport has no surface or photon tallies yet.
+- **CPU only**: yamc's GPU transport refuses surface tallies
+  (fusion-neutronics/yamc-and-yani#104).
   OpenMC does not run on these models; the measurement is their reference.
 - **Not graded.** The site shows the spectra with C/E per bin, and per
   particle the integral C/E, the rms of ln(C/E), and chi2/N with the
