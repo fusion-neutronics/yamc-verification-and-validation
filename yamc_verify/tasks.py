@@ -52,6 +52,11 @@ def nuclear_data_dir(library: str) -> str | None:
 # Doppler broadening). Their run loops pass build_keyed to the cache.
 OPENMC_BUILD_KEYED_FAMILIES = ("photon", "secondary-photon", "decay-photon")
 
+# Families compared with a measurement rather than with OpenMC: experiment
+# validation. They are not graded, so they stay out of the site's bands and the
+# release check.
+VALIDATION_FAMILIES = ("oktavian",)
+
 
 @dataclass(frozen=True)
 class Task:
@@ -59,8 +64,8 @@ class Task:
 
     key: str                      # e.g. "neutron/sphere/endf-b8.1"
     notebook: str                 # repo-relative .ipynb path
-    family: str                   # neutron | photon | secondary-photon | decay-photon | transmutation
-    geometry: str                 # sphere | broomstick | material
+    family: str                   # neutron | photon | secondary-photon | decay-photon | transmutation | oktavian
+    geometry: str                 # sphere | broomstick | material | tokamak | multimaterial-slab
     library: str                  # endf-b8.1 | fendl-3.2d
     label: str                    # dashboard label, e.g. "neutron sphere"
     item_kind: str                # nuclide | element
@@ -80,6 +85,11 @@ class Task:
     @property
     def nuclear_data_dir(self) -> str:
         return nuclear_data_dir(self.library)
+
+    @property
+    def validation(self) -> bool:
+        """Whether the task is compared with a measurement rather than with OpenMC."""
+        return self.family in VALIDATION_FAMILIES
 
 
 def _mc_codes():
@@ -183,6 +193,14 @@ _reg(key="transmutation/material-flux-spectrum/endf-b8.1",
              "yamc_source_rates": [1.0, 1.0, 1.0, 0.0, 0.0],
              "openmc_source_rates": [1.06e14, 1.06e14, 1.06e14, 0.0, 0.0],
              "phases": ["irrad", "irrad", "irrad", "cool", "cool"]})
+
+
+# ---- validation: OKTAVIAN spheres (nuclide; against the measurement) -------
+# The measurement is the reference, so OpenMC does not run. yamc's GPU
+# transport has no surface or photon tallies yet, so only the CPU runs.
+_reg(key="oktavian/sphere/endf-b8.1", notebook="tasks/oktavian/sphere/endf-b8.1.ipynb",
+     family="oktavian", geometry="sphere", library="endf-b8.1", label="OKTAVIAN sphere",
+     item_kind="nuclide", codes=("yamc-cpu",), caches_yamc=True, particles=10_000_000)
 
 
 _BY_KEY = {t.key: t for t in _TASKS}

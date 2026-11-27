@@ -127,29 +127,40 @@ class Run:
 def collect(project: Project, *, models, libraries, codes) -> Run:
     """The run the codes have now: the record :meth:`Project.records` picks for each item.
 
-    Every argument is required, as for :func:`vv.plan`, but nothing is installed
-    or run and no nuclear data is needed.
+    The project's :meth:`~Project.fixed_records` (a measurement, say) of every
+    model a code runs are part of it too. Every argument is required, as for
+    :func:`vv.plan`, but nothing is installed or run and no nuclear data is
+    needed.
     """
     root = _root(project)
     sel = select(project, models=models, libraries=libraries, codes=codes, records_only=True)
     entries = []
+    names = [c.name for c in sel.codes]
+
+    def entry(model, library, code_name, path):
+        path = Path(path).resolve()
+        data = path.read_bytes()
+        record = read_record(path)
+        if record is None:
+            raise PublishError(f"{path} is not a readable record")
+        ci = record.get("code_identity", {})
+        return Entry(model, library, code_name or record["code"], record["code"], record["item"],
+                     ci["build_id"], ci.get("commit"), ci.get("dirty"),
+                     path.relative_to(root).as_posix(), blob_id(data))
+
     for model, library in sel.pairs:
-        for code in sel.codes:
-            if not project.runs(model, library, code):
-                continue
+        running = [code for code in sel.codes if project.runs(model, library, code)]
+        for code in running:
             for path in project.records(model, library, code):
-                path = Path(path).resolve()
-                data = path.read_bytes()
-                record = read_record(path)
-                if record is None:
-                    raise PublishError(f"{path} is not a readable record")
-                ci = record.get("code_identity", {})
-                entries.append(Entry(model, library, code.name, record["code"], record["item"],
-                                     ci["build_id"], ci.get("commit"), ci.get("dirty"),
-                                     path.relative_to(root).as_posix(), blob_id(data)))
+                entries.append(entry(model, library, code.name, path))
+        if running:
+            for path in project.fixed_records(model, library):
+                fixed = entry(model, library, None, path)
+                entries.append(fixed)
+                if fixed.code not in names:
+                    names.append(fixed.code)
     entries.sort(key=lambda e: e.key)
-    return Run([c.spec for c in sel.codes], sel.models, sel.libraries, entries,
-               code_names=[c.name for c in sel.codes])
+    return Run([c.spec for c in sel.codes], sel.models, sel.libraries, entries, code_names=names)
 
 
 def _published(text: Optional[str]) -> list[dict]:

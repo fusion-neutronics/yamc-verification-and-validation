@@ -221,6 +221,15 @@ class Project(abc.ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not grade its results")
 
+    def fixed_records(self, model: str, library: str) -> list[Path]:
+        """Records that come from no code, a measurement say, and belong to every run of ``model`` on ``library``.
+
+        Comparing and publishing include them beside the codes' records,
+        filed under their own name (each record's ``code``), whenever a code
+        in the run runs the model. Default: none.
+        """
+        return []
+
     def records(self, model: str, library: str, code: Code) -> list[Path]:
         """The record of each item that ``code`` has on ``model`` and ``library``, from the stored records alone.
 

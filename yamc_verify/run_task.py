@@ -27,7 +27,7 @@ import os
 
 from . import backends as _backends
 from . import tasks as _tasks
-from .families import decay_photon, neutron, photon, secondary_photon, transmutation
+from .families import decay_photon, neutron, oktavian, photon, secondary_photon, transmutation
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -39,6 +39,7 @@ _FAMILY_MODULE = {
     "decay-photon": decay_photon,
     "transmutation-reaction-rate": transmutation,
     "transmutation-flux-spectrum": transmutation,
+    "oktavian": oktavian,
 }
 
 
