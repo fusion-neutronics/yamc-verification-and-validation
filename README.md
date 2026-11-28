@@ -331,7 +331,8 @@ Before releasing yamc, run the release check on the commit you mean to release:
 vv run --release-check yamc-cpu@<commit> yamc-gpu@<commit>
 ```
 
-It runs a fixed set (`YamcProject.release_check`): every model on
+It runs a fixed set (`YamcProject.release_check`): every model compared with
+OpenMC (the OKTAVIAN validation is not graded, so it stays out), on
 ENDF/B-VIII.1 at the particle counts in `yamc_verify/tasks.py`, on every stable
 isotope and, for the photon models, every element with a stable isotope. It
 sets `YAMC_VERIFY_NUMBER_OF_SIMULATIONS=-1` and ignores `YAMC_VERIFY_NUCLIDES`

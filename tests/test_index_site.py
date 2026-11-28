@@ -55,9 +55,12 @@ def test_a_benchmark_only_in_the_previous_run_is_listed():
     assert gone and all(i.startswith("neutron/tokamak/") for i in gone)
 
 
-def test_the_release_check_set_is_every_model_on_endf_b8_1_stable_isotopes_graded_against_openmc():
+def test_the_release_check_set_is_every_verification_model_on_endf_b8_1_stable_isotopes():
     check = PROJECT.release_check
-    assert check.models == vv.ALL and list(check.libraries) == ["endf-b8.1"]
+    # every model compared with OpenMC; the ungraded validation models stay out
+    assert "oktavian/sphere" not in check.models and "neutron/sphere" in check.models
+    assert set(check.models) == {m for m in PROJECT.models() if m != "oktavian/sphere"}
+    assert list(check.libraries) == ["endf-b8.1"]
     assert list(check.references) == ["openmc"] and tuple(check.bands) == index_builder.QUALITY_ORDER
     # every stable isotope, whatever item variables the caller has set
     assert dict(check.environment) == {"YAMC_VERIFY_NUMBER_OF_SIMULATIONS": "-1",
