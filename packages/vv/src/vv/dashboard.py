@@ -1,4 +1,4 @@
-"""Live, in-place terminal display of a verification run.
+"""Live display of a verification run: in place on a terminal, a line per event otherwise.
 
 The runner (:mod:`vv.runner`) maintains a *raw* state (counts, timestamps,
 observed run times) and calls :func:`render_lines` / :class:`LiveDisplay` with
@@ -156,11 +156,8 @@ def remaining_seconds(state) -> tuple[float, int]:
     return total, unknown
 
 
-def render_lines(state, now: float) -> list[str]:
-    """Render the dashboard to a list of plain-text lines."""
-    lines = list(state.get("header", []))
-
-    global_avg = _global_avg(state)
+def summary_line(state) -> str:
+    """The display's top line: items loaded and computed of the total, and the time left."""
     tot = cached = computed = 0
     for t in state["tasks"]:
         for c in t["codes"].values():
@@ -170,7 +167,14 @@ def render_lines(state, now: float) -> list[str]:
     eta_total, _ = remaining_seconds(state)
     to_compute = max(0, tot - cached)
     eta_str = f" ETA {humanize(eta_total)}" if eta_total > 0 else ""
-    lines.append(f"{cached}/{tot} cached, {computed}/{to_compute} completed{eta_str}")
+    return f"{cached}/{tot} cached, {computed}/{to_compute} completed{eta_str}"
+
+
+def render_lines(state, now: float) -> list[str]:
+    """Render the dashboard to a list of plain-text lines."""
+    lines = list(state.get("header", []))
+    global_avg = _global_avg(state)
+    lines.append(summary_line(state))
     lines.append("")
 
     for t in state["tasks"]:
@@ -180,24 +184,66 @@ def render_lines(state, now: float) -> list[str]:
     return lines
 
 
-class LiveDisplay:
-    """Render the dashboard in place (ANSI) on a TTY, or as snapshots otherwise."""
+SUMMARY_SECONDS = 300.0
+"""Off a terminal, how often :class:`LiveDisplay` writes a progress line while nothing else happens."""
 
-    def __init__(self, stream=None, tty=None):
+
+class LiveDisplay:
+    """Render the dashboard in place (ANSI) on a TTY; off one, write a line per event.
+
+    On a terminal every update redraws the display in place. Off one (a file,
+    ``nohup``, CI, a pipe) a redraw would append the whole display again on
+    every update, about once a second, which on a run of days is millions of
+    repeated lines. So the first update writes the display once (the plan),
+    and after that a line is written when a row starts and when it finishes,
+    with its counts and time, plus :func:`summary_line` at most every
+    ``summary_seconds`` while nothing else happens.
+    """
+
+    def __init__(self, stream=None, tty=None, summary_seconds: float = SUMMARY_SECONDS):
         self.stream = stream or sys.stdout
         self._tty = self.stream.isatty() if tty is None else tty
         self._prev = 0
+        self.summary_seconds = summary_seconds
+        self._status = None   # (task label, row) -> the row status last written off a TTY
+        self._last_line = None
 
     def update(self, state, now: float) -> None:
         """Draw ``state`` as of the monotonic time ``now``."""
-        lines = render_lines(state, now)
         out = self.stream
         if self._tty:
+            lines = render_lines(state, now)
             if self._prev:
                 out.write(f"\033[{self._prev}A")
             for ln in lines:
                 out.write("\033[2K" + ln + "\n")
             self._prev = len(lines)
+            out.flush()
+            return
+        if self._status is None:
+            lines = render_lines(state, now)
+            self._status = {(t["label"], name): c["status"] for t in state["tasks"] for name, c in t["codes"].items()}
         else:
-            out.write("\n".join(lines) + "\n" + ("-" * 48) + "\n")
-        out.flush()
+            lines = self._events(state, now)
+        if not lines and now - self._last_line >= self.summary_seconds:
+            lines = [summary_line(state)]
+        if lines:
+            out.write("\n".join(lines) + "\n")
+            out.flush()
+            self._last_line = now
+
+    def _events(self, state, now: float) -> list[str]:
+        """A line for each row that started or finished since the last update."""
+        global_avg = _global_avg(state)
+        lines = []
+        for t in state["tasks"]:
+            for name, c in t["codes"].items():
+                key = (t["label"], name)
+                if c["status"] == self._status.get(key):
+                    continue
+                self._status[key] = c["status"]
+                if c["status"] == "running":
+                    lines.append(f"{t['label']}: {name} started")
+                elif c["status"] == "done":
+                    lines.append(f"{t['label']}: {name} - {_code_line(c, now, global_avg)}")
+        return lines
