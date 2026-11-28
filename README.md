@@ -431,6 +431,15 @@ pip install "vv @ git+https://github.com/fusion-neutronics/yamc-verification-and
 - `vv.cli`: the `vv plan`, `vv run`, `vv compare`, `vv publish` and `vv release`
   commands, and `vv run --release-check`, which find the project through the
   nearest `vv.toml`.
+- `vv.site`: what every site shares. `vv.css` holds the colour tokens (with
+  dark mode), cards, filters, tiles, the results table, detail panels and prose
+  pages; `vv.js` holds formatting, tooltips, fetching a published record,
+  Plotly theming, and `vv.explorer`, a filterable, sortable benchmark table
+  with an expandable detail row. `copy_assets(site)` copies both into a site
+  and `item_records(root, run, site)` writes the run's records there as their
+  exact published bytes. Each project keeps its own page and index builder on
+  top of these (fusion-neutronics/yamc-and-yani#55); this site's
+  `web/benchmarks.html` has not moved onto them yet.
 
 Its tests are in `packages/vv/tests/`.
 
