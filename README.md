@@ -129,7 +129,9 @@ estimate: about 2.2 hrs, including building 1 environment(s)
 
 `vv run` builds the environments that are not ready, then runs each model,
 library and code as a separate process inside that code's environment, with the
-same layout as a live, in-place display. Its output goes to a log per job, named
+same layout as a live, in-place display. Off a terminal (a file, `nohup`, CI) it
+writes that layout once, then a line as each row starts and finishes and a
+progress line every five minutes, rather than the whole display every second. Its output goes to a log per job, named
 at the end if a job fails. Records are written as described in
 [Results cache](#results-cache).
 

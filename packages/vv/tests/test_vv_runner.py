@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import vv
+from vv import dashboard
 from vv.runner import apply_event, build_state
 
 
@@ -207,3 +208,69 @@ def test_codes_sharing_an_environment_build_and_count_it_once(tmp_path):
     assert vv.run(project, models=["sphere"], libraries=["lib-a"], codes=["code-a==1.0", "code-b==1.0"],
                   stream=io.StringIO()).ok
     assert project.built == ["code-a==1.0"]
+
+
+# --- the display off a terminal ------------------------------------------------
+
+
+def _state(rows):
+    return {"header": ["fake verification: code-a==1.0"], "tasks": [{
+        "label": "sphere lib-a", "status": "running", "t_start": 0.0, "t_end": None,
+        "codes": {name: {"total": 2, "cached": cached, "computed": computed, "running_key": None,
+                         "status": status, "t_start": 0.0, "t_end": 5.0 if status == "done" else None,
+                         "obs_times": [], "seed_avg": None}
+                  for name, (status, cached, computed) in rows.items()}}]}
+
+
+def test_off_a_terminal_the_display_writes_events_not_snapshots():
+    out = io.StringIO()
+    display = dashboard.LiveDisplay(out, tty=False, summary_seconds=60)
+    display.update(_state({"code-a==1.0": ("queued", 0, 0), "code-b==2.0": ("queued", 2, 0)}), 0.0)
+    plan = out.getvalue()
+    assert "fake verification: code-a==1.0" in plan and "    code-a==1.0 - 2/2 todo" in plan
+    for second in range(1, 30):  # nothing happens: nothing is written
+        display.update(_state({"code-a==1.0": ("queued", 0, 0), "code-b==2.0": ("queued", 2, 0)}), float(second))
+    assert out.getvalue() == plan
+    display.update(_state({"code-a==1.0": ("running", 0, 1), "code-b==2.0": ("queued", 2, 0)}), 30.0)
+    display.update(_state({"code-a==1.0": ("done", 0, 2), "code-b==2.0": ("done", 2, 0)}), 31.0)
+    events = out.getvalue()[len(plan):].splitlines()
+    assert events == ["sphere lib-a: code-a==1.0 started",
+                      "sphere lib-a: code-a==1.0 - 2/2 completed 5 secs",
+                      "sphere lib-a: code-b==2.0 - 2/2 cached"]
+
+
+def test_off_a_terminal_a_quiet_stretch_gets_a_summary_line_at_most_every_interval():
+    out = io.StringIO()
+    display = dashboard.LiveDisplay(out, tty=False, summary_seconds=60)
+    running = _state({"code-a==1.0": ("running", 0, 1)})
+    display.update(running, 0.0)
+    display.update(running, 1.0)  # the start event
+    before = len(out.getvalue().splitlines())
+    for second in range(2, 200):
+        display.update(running, float(second))
+    summaries = out.getvalue().splitlines()[before:]
+    assert summaries == ["0/2 cached, 1/2 completed"] * 3  # at 61, 121 and 181 s
+
+
+def test_on_a_terminal_every_update_redraws_in_place():
+    out = io.StringIO()
+    display = dashboard.LiveDisplay(out, tty=True)
+    state = _state({"code-a==1.0": ("queued", 0, 0)})
+    display.update(state, 0.0)
+    display.update(state, 1.0)
+    assert out.getvalue().count("\033[2K" + "fake verification: code-a==1.0") == 2 and "\033[" in out.getvalue()
+
+
+SLOW = EMIT.replace('print("ran in", os.getcwd())', 'import time; time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))')
+
+
+def test_a_run_writes_as_many_lines_off_a_terminal_however_long_it_takes(tmp_path, monkeypatch):
+    lengths = []
+    for sleep in ("0", "2.5"):
+        monkeypatch.setenv("FAKE_SLEEP", sleep)
+        out = io.StringIO()
+        result = vv.run(FakeProject(tmp_path, script=SLOW), models=["sphere"], libraries=["lib-a"],
+                        codes=["code-a==1.0", "code-b==2.0"], stream=out)
+        assert result.ok and "all 2 job(s) completed" in out.getvalue()
+        lengths.append(len(out.getvalue().splitlines()))
+    assert lengths[0] == lengths[1]
