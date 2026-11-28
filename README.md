@@ -191,6 +191,68 @@ python -m yamc_verify.run_task neutron/sphere/endf-b8.1      # one task, no disp
 
 The runs only write to the on-disk cache (the database the benchmark page reads).
 
+## Validation against measurements
+
+Every other model compares yamc with OpenMC. The OKTAVIAN spheres
+(`oktavian/sphere`) compare it with what was measured: the neutron and photon
+leakage spectra of single-isotope spheres around a D-T source at Osaka
+University's OKTAVIAN facility (JAERI-M 94-014), from the FENDL-2 benchmark
+sublibrary.
+
+| item | sample | vessel |
+|---|---|---|
+| `Al27` | 1.22 g/cm3 | 40 cm Type-II, SUS-304, 0.2 cm walls (the experimenters' own MCNP deck) |
+| `Mn55` | 4.37 g/cm3 | 61 cm Type-I, SS-41, 0.5 cm walls, as the report describes it |
+
+```bash
+vv run --models oktavian/sphere --libraries endf-b8.1 --codes yamc-cpu==0.28.0
+```
+
+```python
+from yamc_verify import validation
+
+validation(models="all", libraries=["endf-b8.1"], codes=["yamc-cpu==0.28.0"])
+```
+
+`validation()` takes only validation models (`"all"` is every one of them),
+and `verification()` only the models compared with OpenMC. `vv run --models
+all` runs both kinds.
+
+- **The measurement is a record** like a code's, committed under
+  `tasks/oktavian/sphere/measurement/` and part of every run of the model
+  (`YamcProject.fixed_records`), so it is published and archived with the run.
+  It holds the measured leakage with its errors (`null` where the scanned report
+  cannot be read safely or has no measurement), the experiment's source neutron
+  spectrum and the tritium target's own gamma rays, so a run downloads nothing.
+  `python -m yamc_verify.families.oktavian` rewrites the records from the report
+  files, pinned by sha256 and downloaded once into
+  `~/.cache/yamc-verification/oktavian`.
+- **Leakage** is the outward surface current on the vessel's outer sphere,
+  which is the vacuum boundary. It agrees with the void-shell track-length
+  estimate it replaces to within 0.015% in every bin holding more than 0.1% of
+  the leakage, on both spheres. The target's gammas are transported in a
+  separate photon-only run and added to the photon leakage.
+- **CPU only**: yamc's GPU transport refuses surface tallies
+  (fusion-neutronics/yamc-and-yani#104).
+  OpenMC does not run on these models; the measurement is their reference.
+- **Not graded.** The site shows the spectra with C/E per bin, and per
+  particle the integral C/E, the rms of ln(C/E), and chi2/N with the
+  experimental and Monte Carlo errors in quadrature. The neutron errors are
+  counting statistics only, so chi2/N is large even where C/E is close to 1.
+  These comparisons stay out of the agreement bands, the deviation figures and
+  the release check.
+
+Known differences from the experiment, kept rather than tuned away: the photon
+measurement gated out photons arriving later than about 65 ns after the source
+pulse, while yamc runs to steady state, so slow capture gammas are included;
+the Mn vessel's 5.1 cm beam hole is modelled empty, since the report does not
+give the tube thickness; and the report's sample masses agree with the
+modelled geometries to within 3%. The Co and Nb spheres are left out (the Co
+measurement reports more leaking neutrons than its physics allows, and for Nb
+every library misses by the same amount, which points at the vessel model);
+the other spheres and further experiments are listed in
+fusion-neutronics/example-endf-to-transport-validation#1.
+
 ## Comparing and publishing a run
 
 A *run* is the record each item has for a set of codes: the yamc records of the
@@ -291,7 +353,8 @@ from it (there are no notebooks):
   geometry, particle statistics, which codes run, whether YAMC is cached). Single
   source of truth shared by `run_task` and the orchestrator.
 - `families/`: per-physics-family simulation runners, plotting, and metrics
-  (`neutron`, `photon`, `secondary_photon`, `decay_photon`, `transmutation`),
+  (`neutron`, `photon`, `secondary_photon`, `decay_photon`, `transmutation`,
+  and `oktavian` for the validation against measurements),
   each exposing `run_all(task, backends, cache_dir=...)`. YAMC runs with
   `verbose=[]` and OpenMC with `verbosity=1` + `output=False`, so runs are silent.
 - `run_task.py`: drives one task: dispatches `task.family` to its family module's
@@ -330,10 +393,17 @@ pip install "vv @ git+https://github.com/fusion-neutronics/yamc-verification-and
 - `vv.publish`: the runs: comparing the records with the published run,
   publishing them, and the release archive of each published run (see
   [Comparing and publishing a run](#comparing-and-publishing-a-run)). A project
-  says which records each code has with `Project.records`.
+  says which records each code has with `Project.records`, and which records
+  come from no code but belong to every run of a model (a measurement) with
+  `Project.fixed_records`.
 - `vv.release_check`: the pre-release check (see
   [Checking a release](#checking-a-release)). A project names its fixed set with
-  `Project.release_check` and grades its results with `Project.grades`.
+  `Project.release_check` and grades its results with `Project.grades`: in
+  bands (as here), or by each result's distance from its references
+  (`Grade.distances`, with no bands), in which case any result that moves
+  further from a reference than the check's tolerance is flagged. The
+  candidate is graded against the published run's own records of the
+  reference codes and of the fixed records.
 - `vv.cli`: the `vv plan`, `vv run`, `vv compare`, `vv publish` and `vv release`
   commands, and `vv run --release-check`, which find the project through the
   nearest `vv.toml`.

@@ -8,9 +8,15 @@ published run's own reference record where it has one, so a grade can only
 move because the candidate did, and compared with the grade the published run
 gives the same item.
 
+The candidate is graded against the published run's own records of the
+reference codes and of the project's fixed records (a measurement, say).
+
 Flagged:
 
-* ``worse``: a lower band than in the published run;
+* ``worse``: a lower band than in the published run, or further from any
+  reference the grade measures its distance from (:attr:`vv.Grade.distances`)
+  by more than the check's tolerance. Such a move is not necessarily wrong:
+  the reference may be, and the review has to say so;
 * ``fails``: the published run has a grade, the candidate has no record, and
   the job that should have made it failed;
 * ``missing``: the published run has a grade and the candidate has none.
@@ -46,6 +52,8 @@ class Setup:
     references: list[str]
     """The reference codes, at the versions ``against`` has."""
     candidates: list[Code]
+    published_names: set[str] = field(default_factory=set)
+    """The names of the codes ``against`` was run with."""
 
     @property
     def codes(self) -> list[str]:
@@ -95,7 +103,7 @@ def setup(project: Project, codes) -> Setup:
             problems.append(f"the published run {against.tag} has no {name} results to grade against")
     if problems:
         raise ReleaseCheckError("cannot run this release check:\n" + "\n".join(f"  - {p}" for p in problems))
-    return Setup(check, against, references, candidates)
+    return Setup(check, against, references, candidates, set(published))
 
 
 @dataclass
@@ -109,6 +117,10 @@ class Finding:
     new: Optional[Grade] = None
     note: str = ""
     log: Optional[Path] = None
+    away: dict = field(default_factory=dict)
+    """The references the result moved further from, each mapped to ``(old, new)`` distance."""
+    toward: dict = field(default_factory=dict)
+    """The references the result moved closer to, each mapped to ``(old, new)`` distance."""
 
 
 @dataclass
@@ -193,13 +205,22 @@ def pinned_environment(environment: Mapping[str, Optional[str]]):
                 os.environ[k] = v
 
 
+def _band(grade: Grade) -> str:
+    return grade.band if grade.band is not None else "graded"
+
+
 def _describe(f: Finding) -> str:
     if f.status in ("fails", "missing"):
-        text = f"{f.old.band} -> {f.note}"
+        text = f"{_band(f.old)} -> {f.note}"
         return text + (f" (log: {f.log})" if f.log is not None else "")
     if f.status == "new":
-        return f"{f.new.band}" + (f"   {f.new.note}" if f.new.note else "")
-    text = f"{f.old.band} -> {f.new.band}"
+        return _band(f.new) + (f"   {f.new.note}" if f.new.note else "")
+    parts = []
+    if f.old.band is not None or f.new.band is not None:
+        parts.append(f"{_band(f.old)} -> {_band(f.new)}")
+    parts += [f"further from {ref} {a:.4g} -> {b:.4g}" for ref, (a, b) in sorted(f.away.items())]
+    parts += [f"closer to {ref} {a:.4g} -> {b:.4g}" for ref, (a, b) in sorted(f.toward.items())]
+    text = "; ".join(parts) or "unchanged"
     if f.old.note or f.new.note:
         text += f"   {f.old.note} -> {f.new.note}"
     return text
@@ -219,31 +240,46 @@ def _report(project: Project, s: Setup, failed: Optional[Mapping[tuple[str, str,
     current = collect(project, models=ALL if s.check.models == ALL else list(s.check.models),
                       libraries=list(s.check.libraries), codes=s.codes)
     names = {c.name for c in s.candidates}
-    references = set(s.check.references)
+    code_names = names | set(s.check.references) | s.published_names
+    # What the candidate is graded against: the reference codes' records and
+    # the project's fixed records (a measurement), which come from no code.
+    fixed = {e.code for e in current.entries + s.against.entries if e.code not in code_names}
+    pinned = set(s.check.references) | fixed
 
     def in_set(e) -> bool:
         return e.model in current.models and e.library in current.libraries
 
-    published_refs = {e.key: e for e in s.against.entries if in_set(e) and e.code in references}
+    published_refs = {e.key: e for e in s.against.entries if in_set(e) and e.code in pinned}
     candidate = [e for e in current.entries if e.code in names]
-    # The candidate is graded against the published references wherever there
-    # is one, so that only the candidate can move a grade.
+    # The candidate is graded against the published run's references wherever
+    # it has one, so that only the candidate can move a grade.
     graded_now = Run(current.codes, current.models, current.libraries, sorted(
         candidate + list(published_refs.values())
-        + [e for e in current.entries if e.code in references and e.key not in published_refs],
+        + [e for e in current.entries if e.code in pinned and e.key not in published_refs],
         key=lambda e: e.key))
     graded_then = Run(s.against.codes, current.models, current.libraries,
-                      [e for e in s.against.entries if in_set(e) and e.code in names | references],
+                      [e for e in s.against.entries if in_set(e) and e.code in names | pinned],
                       s.against.tag, s.against.date)
     old, new = project.grades(graded_then), project.grades(graded_now)
 
     bands = list(s.check.bands)
+    tolerance = s.check.tolerance
 
     def rank(grade: Grade) -> int:
+        if not bands and grade.band is None:
+            return 0
         if grade.band not in bands:
             raise ReleaseCheckError(f"{type(project).__name__}.grades gave the band {grade.band!r}, "
                                     f"which is not one of its release check's bands {bands}")
         return bands.index(grade.band)
+
+    def moves(o: Grade, n: Grade) -> tuple[dict, dict]:
+        shared = o.distances.keys() & n.distances.keys()
+        away = {r: (o.distances[r], n.distances[r]) for r in shared
+                if n.distances[r] - o.distances[r] > tolerance}
+        toward = {r: (o.distances[r], n.distances[r]) for r in shared
+                  if o.distances[r] - n.distances[r] > tolerance}
+        return away, toward
 
     code_of = {(e.model, e.library, e.label): e.code for e in s.against.entries + candidate}
     has_record = {e.key for e in candidate}
@@ -252,7 +288,9 @@ def _report(project: Project, s: Setup, failed: Optional[Mapping[tuple[str, str,
         o, n = old.get(key), new.get(key)
         if o is not None and n is not None:
             step = rank(n) - rank(o)
-            findings.append(Finding(key, "worse" if step > 0 else "better" if step < 0 else "same", o, n))
+            away, toward = moves(o, n)
+            status = "worse" if step > 0 or away else "better" if step < 0 or toward else "same"
+            findings.append(Finding(key, status, o, n, away=away, toward=toward))
         elif n is not None:
             rank(n)
             findings.append(Finding(key, "new", new=n))

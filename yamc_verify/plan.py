@@ -60,6 +60,10 @@ def discover_items(task: Task, discover_with_openmc: bool) -> list[str]:
     or layers as items.
     """
     fam = task.family
+    if fam == "oktavian":
+        from .families import oktavian
+
+        return oktavian.discover(task, discover_with_openmc)
     ndir = task.nuclear_data_dir
     if fam == "neutron" and task.geometry == "tokamak":
         from .families import tokamak
