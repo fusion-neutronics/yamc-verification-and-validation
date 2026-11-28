@@ -77,6 +77,58 @@ class Code:
         return self.environment_key or self.spec
 
 
+@dataclass(frozen=True)
+class Grade:
+    """How one result agrees with its references: a band, its distance from each, and the numbers behind them.
+
+    ``band`` is one of the project's :attr:`ReleaseCheck.bands`, or ``None``
+    for a project that grades without bands. ``distances`` maps each reference
+    the result is compared with (``measurement``, say) to how far the result
+    is from it, smaller being closer, in a measure the project chooses; the
+    release check flags a result that moves further from any of them. ``note``
+    is shown beside it by the release check, for example ``chi2/N 1.2``.
+    """
+
+    band: Optional[str] = None
+    note: str = ""
+    distances: Mapping[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ReleaseCheck:
+    """The fixed set ``vv run --release-check`` runs before a release (see :mod:`vv.release_check`).
+
+    Attributes
+    ----------
+    models : list of str, or "all"
+        The models it runs.
+    libraries : list of str
+        The libraries it runs them on.
+    references : list of str
+        The names of the codes the others are graded against. The check runs
+        them at the version the newest published run has, and grades against
+        that run's own records of them.
+    bands : list of str, optional
+        Every band :meth:`Project.grades` gives, best first; none for a
+        project that grades by distance from its references alone.
+    environment : dict, optional
+        Variables the check sets while it runs, ``None`` unsetting one, so
+        that every check runs the same items whatever the caller's
+        environment says.
+    tolerance : float, optional
+        How much further from a reference (see :attr:`Grade.distances`) a
+        result may move before the check flags it. 0, the default, flags any
+        increase.
+    """
+
+    models: Union[str, Sequence[str]]
+    libraries: Sequence[str]
+    references: Sequence[str]
+    bands: Sequence[str] = ()
+    environment: Mapping[str, Optional[str]] = field(default_factory=dict)
+    tolerance: float = 0.0
+
+
 @dataclass
 class Row:
     """One line of the plan and the display: the items one code files under one name.
@@ -165,6 +217,29 @@ class Project(abc.ABC):
     @abc.abstractmethod
     def command(self, job: Job, codes: Sequence[Code], python: Path) -> Command:
         """How to run ``job`` with ``python``, the interpreter of its code's environment."""
+
+    release_check: Optional[ReleaseCheck] = None
+    """The fixed set ``vv run --release-check`` runs, or ``None`` if the project has none."""
+
+    def grades(self, run) -> dict[tuple[str, str, str, str], Grade]:
+        """The grade of each result in ``run`` that has a reference to be graded against.
+
+        ``run`` is a :class:`vv.publish.Run`. Each key is the graded record's
+        ``(model, library, label, item)``. The records of the
+        :attr:`ReleaseCheck.references` codes are what the others are graded
+        against, so they have no grade of their own. Needed by the release
+        check, not by planning, running or publishing.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not grade its results")
+
+    def fixed_records(self, model: str, library: str) -> list[Path]:
+        """Records that come from no code, a measurement say, and belong to every run of ``model`` on ``library``.
+
+        Comparing and publishing include them beside the codes' records,
+        filed under their own name (each record's ``code``), whenever a code
+        in the run runs the model. Default: none.
+        """
+        return []
 
     def records(self, model: str, library: str, code: Code) -> list[Path]:
         """The record of each item that ``code`` has on ``model`` and ``library``, from the stored records alone.

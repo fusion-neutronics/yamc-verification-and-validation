@@ -17,9 +17,11 @@ transmutation step comparator, mirroring :mod:`yamc_verify.audit`.
 Two denominators are reported deliberately because they differ: ``simulations``
 counts every record of the run (OpenMC-only runs included) while
 ``comparisons`` counts only (benchmark, backend) pairs where both an OpenMC and
-a YAMC result exist. ``floats_compared`` totals the values examined per
-comparison: spectrum bins, shared scalar tallies, and per-timestep nuclide
-densities. The global deviation is published as a distribution (mean / median
+a YAMC result exist. ``validations`` counts the comparisons of a YAMC result
+with a measurement (the OKTAVIAN spheres), which are not graded and stay out of
+the agreement figures. ``floats_compared`` totals the values examined per
+comparison: spectrum bins, shared scalar tallies, per-timestep nuclide
+densities, and measured bins. The global deviation is published as a distribution (mean / median
 / p90 / max) plus a worst-N list and per-quality counts -- never a single number.
 
 Nothing is simulated: it reads the committed records and git, so it runs in CI
@@ -50,15 +52,16 @@ from .plotting import calculate_spectral_agreement, quality_from_chi2
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-_QUALITY_ORDER = ("Excellent", "Good", "Fair", "Poor")
+QUALITY_ORDER = ("Excellent", "Good", "Fair", "Poor")
+"""The grade bands, best first."""
 
 # results-dict scalar tallies: (means key, prefix for the published name)
 _SCALAR_KEYS = (("tallies", ""), ("n_scalars", "n:"), ("p_scalars", "p:"))
 
 
 def _worst_quality(qualities):
-    ranked = [q for q in qualities if q in _QUALITY_ORDER]
-    return max(ranked, key=_QUALITY_ORDER.index) if ranked else None
+    ranked = [q for q in qualities if q in QUALITY_ORDER]
+    return max(ranked, key=QUALITY_ORDER.index) if ranked else None
 
 
 # Electron-treatment suffixes on secondary-photon codes (openmc-led, yamc-cpu-ttb,
@@ -289,7 +292,7 @@ def _mismatch_key(cmp):
     chi2 = cmp.get("residual_reduced_chi_squared", cmp.get("reduced_chi_squared"))
     rd = cmp.get("max_tally_rel_diff_pct") or cmp.get("max_rel_diff_pct")
     return (
-        _QUALITY_ORDER.index(cmp["quality"]) if cmp.get("quality") in _QUALITY_ORDER else -1,
+        QUALITY_ORDER.index(cmp["quality"]) if cmp.get("quality") in QUALITY_ORDER else -1,
         chi2 if isinstance(chi2, (int, float)) and math.isfinite(chi2) else 0.0,
         rd if isinstance(rd, (int, float)) and math.isfinite(rd) else 0.0,
     )
@@ -310,13 +313,15 @@ def _distribution(values):
     }
 
 
-def _benchmarks(run, tasks_list, site=None):
-    """The benchmark entries of one published run, and how many records it has.
+def benchmarks(run, tasks_list, site=None, root=None):
+    """The benchmark entries of one run, each with its graded comparisons, and how many records it has.
 
-    Each record is the exact published bytes (read back from git if it has been
-    replaced since), filed in the site as ``records/<blob>.json`` when ``site``
-    is given.
+    Each record is the exact published bytes (read back from git under ``root``
+    if it has been replaced since), filed in the site as ``records/<blob>.json``
+    when ``site`` is given. The release check grades with this too
+    (:meth:`yamc_verify.project.YamcProject.grades`), so it grades as the site does.
     """
+    root = _REPO_ROOT if root is None else root
     by_key = {t.key: t for t in tasks_list}
     grouped: dict = {}
     for e in run.entries:
@@ -328,7 +333,7 @@ def _benchmarks(run, tasks_list, site=None):
             continue
         loaded, files = {}, {}
         for label, e in entries.items():
-            data = record_bytes(_REPO_ROOT, e)
+            data = record_bytes(root, e)
             record = json.loads(data)
             loaded[label] = (record["code_identity"], decode(record.get("results") or {}))
             files[label] = f"records/{e.blob}.json"
@@ -336,7 +341,7 @@ def _benchmarks(run, tasks_list, site=None):
                 path = Path(site) / files[label]
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
-        n_records += len(loaded)
+        n_records += sum(label != "measurement" for label in loaded)  # a measurement is not a simulation
         comparisons = []
         # Pair each OpenMC reference with the YAMC backends that share its
         # electron-treatment suffix (openmc-led vs yamc-cpu-led, ...). Codes
@@ -347,6 +352,9 @@ def _benchmarks(run, tasks_list, site=None):
             base, treatment = _split_treatment(code)
             by_treatment.setdefault(treatment, {})[base] = code
         element = key if task.item_kind == "element" else element_from_nuclide(key)
+        if task.validation:
+            comparisons += _validations(loaded)
+            by_treatment = {}  # nothing to pair with OpenMC
         for treatment in sorted(by_treatment):
             group = by_treatment[treatment]
             ref = group.get("openmc")
@@ -384,9 +392,43 @@ def _benchmarks(run, tasks_list, site=None):
     return out, n_records
 
 
+def _validations(loaded):
+    """Each code's comparison with the measurement of a validation benchmark. Not graded.
+
+    Per particle: chi2/N, integral C/E, the rms of ln(C/E) and the largest Monte
+    Carlo error (:func:`yamc_verify.families.oktavian.goodness_of_fit`). The
+    per-bin C/E is left to the page, which loads both records.
+    """
+    from .families import oktavian
+
+    ref = loaded.get(oktavian.MEASUREMENT)
+    if ref is None:
+        return []
+    ref_ident, experiment = ref
+    out = []
+    for code in sorted(loaded):
+        if code == oktavian.MEASUREMENT:
+            continue
+        ident, results = loaded[code]
+        fit = oktavian.compare(experiment, results)
+        out.append({
+            "code": code,
+            "treatment": None,
+            "yamc_version": ident.get("version"),
+            "yamc_build": ident.get("build_id"),
+            "reference_build": ref_ident.get("build_id"),
+            "kind": "validation",
+            "quality": None,
+            **{particle: {k: v for k, v in fit[particle].items() if k != "c_over_e"} for particle in fit},
+            "floats_compared": sum(fit[particle]["bins"] for particle in fit),
+        })
+    return out
+
+
 # What the page shows of a comparison in the previous run, beside the latest.
 _PREVIOUS_KEYS = ("quality", "reduced_chi_squared", "residual_reduced_chi_squared",
-                  "weighted_avg_rel_diff_pct", "max_rel_diff_pct", "max_tally_rel_diff_pct", "yamc_build")
+                  "weighted_avg_rel_diff_pct", "max_rel_diff_pct", "max_tally_rel_diff_pct", "yamc_build",
+                  "neutron", "photon")
 
 
 def _run_summary(run):
@@ -404,14 +446,14 @@ def build_index(runs=None, tasks_list=None, worst_n=15, site=None):
     runs = shown_runs(_REPO_ROOT) if runs is None else runs
     run = runs[0] if runs else None
     previous = runs[1] if len(runs) > 1 else None
-    records, n_simulations = _benchmarks(run, tasks_list, site) if run else ([], 0)
+    records, n_simulations = benchmarks(run, tasks_list, site) if run else ([], 0)
     if previous is not None:
-        before, _ = _benchmarks(previous, tasks_list)
+        before, _ = benchmarks(previous, tasks_list)
         was = {r["id"]: {c["code"]: {k: c.get(k) for k in _PREVIOUS_KEYS} for c in r["comparisons"]}
                for r in before}
         for r in records:
             r["previous"] = was.get(r["id"])
-        prev_flat = [c for r in before for c in r["comparisons"]]
+        prev_flat = [c for r in before for c in r["comparisons"] if c.get("kind") != "validation"]
         previous_summary = {**_run_summary(previous),
                             "benchmarks": len(before), "comparisons": len(prev_flat),
                             "quality_counts": dict(Counter(c["quality"] for c in prev_flat if c.get("quality"))),
@@ -431,11 +473,12 @@ def build_index(runs=None, tasks_list=None, worst_n=15, site=None):
                 unindexed.append(lib_dir.relative_to(_REPO_ROOT).as_posix())
 
     flat = [(r, c) for r in records for c in r["comparisons"]]
-    # Residual grading (#59): every comparison carries a genuine grade, so all of
-    # them enter the deviation distribution and worst-mismatch list. A comparison
-    # whose only difference was an accounted-for expected one grades Excellent and
-    # sorts low naturally (its residual chi-squared is small).
-    graded = flat
+    # Residual grading (#59): every comparison with OpenMC carries a genuine grade,
+    # so all of them enter the deviation distribution and worst-mismatch list. A
+    # comparison whose only difference was an accounted-for expected one grades
+    # Excellent and sorts low naturally (its residual chi-squared is small).
+    # Comparisons with a measurement are not graded and stay out of both.
+    graded = [(r, c) for r, c in flat if c.get("kind") != "validation"]
     worst = sorted(graded, key=lambda rc: _mismatch_key(rc[1]), reverse=True)[:worst_n]
     index = {
         "schema_version": 2,
@@ -446,7 +489,8 @@ def build_index(runs=None, tasks_list=None, worst_n=15, site=None):
             "simulations": n_simulations,
             "benchmarks": len(records),
             "benchmarks_compared": sum(1 for r in records if r["comparisons"]),
-            "comparisons": len(flat),
+            "comparisons": len(graded),
+            "validations": len(flat) - len(graded),
             "floats_compared": sum(c["floats_compared"] for _, c in flat),
         },
         "facets": {

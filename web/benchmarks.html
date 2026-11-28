@@ -261,7 +261,8 @@
   <header class="page">
     <h1>Benchmark database</h1>
     <p>Every simulation of the latest published run, filterable by what it models, with
-       YAMC-vs-OpenMC agreement wherever a paired result exists.</p>
+       YAMC-vs-OpenMC agreement wherever a paired result exists, and YAMC against the
+       measurement for the OKTAVIAN spheres.</p>
     <p class="run-line" id="run-line" hidden></p>
   </header>
 
@@ -461,13 +462,15 @@
     "secondary-photon": "Secondary photon",
     "decay-photon": "Decay photon",
     "transmutation-reaction-rate": "Transmutation reaction rate",
-    "transmutation-flux-spectrum": "Transmutation flux spectrum"
+    "transmutation-flux-spectrum": "Transmutation flux spectrum",
+    "oktavian": "OKTAVIAN leakage (measured)"
   };
   var CODE_LABEL = {
     "openmc": "OpenMC CPU",
     "yamc-cpu": "YAMC CPU",
     "yamc-gpu": "YAMC GPU",
     "yamc": "YAMC CPU",
+    "measurement": "Measurement",
     // Electron-treatment-suffixed codes (secondary-photon; see the treatment facet).
     "openmc-led": "OpenMC CPU (LED)",
     "openmc-ttb": "OpenMC CPU (TTB)",
@@ -609,14 +612,32 @@
     });
     return out;
   }
+  /* the comparisons with OpenMC, which are graded; a comparison with a
+     measurement (kind "validation") is not, and stays out of the aggregates */
   function comparisons(recs) {
     var out = [];
     recs.forEach(function (r) {
       r.comparisons.forEach(function (c) {
-        if (treatmentMatches(c)) out.push({ rec: r, cmp: c });
+        if (c.kind !== "validation" && treatmentMatches(c)) out.push({ rec: r, cmp: c });
       });
     });
     return out;
+  }
+  function validations(recs) {
+    var n = 0;
+    recs.forEach(function (r) {
+      r.comparisons.forEach(function (c) { if (c.kind === "validation") n++; });
+    });
+    return n;
+  }
+  /* "n C/E 1.02 · rms ln(C/E) 33%" for one particle of a validation comparison */
+  function validationText(c, particle, short) {
+    var f = c[particle];
+    if (!f || !f.bins) return (short ? particle[0] : particle) + ": no measured bins";
+    var name = short ? (particle === "neutron" ? "n" : "γ") : particle;
+    return name + " C/E " + (num(f.integral_c_over_e) === null ? "n/a" : f.integral_c_over_e.toFixed(3)) +
+           " · rms ln(C/E) " + fmtPct(f.bin_deviation_percent) +
+           (short ? "" : " · χ²/N " + fmtChi2(f.chi2_per_bin));
   }
 
   /* severity: quality band first, then residual chi2, then worst rel diff (mirrors
@@ -711,7 +732,8 @@
     var box = $("tiles");
     box.textContent = "";
     var sims = 0, floats = 0;
-    recs.forEach(function (r) { sims += r.codes.length; });
+    /* a measurement is not a simulation */
+    recs.forEach(function (r) { sims += r.codes.filter(function (c) { return c !== "measurement"; }).length; });
     pairs.forEach(function (p) { floats += p.cmp.floats_compared || 0; });
 
     // Residual grading (#59): every comparison carries a genuine grade, so all enter
@@ -726,8 +748,10 @@
 
     box.appendChild(tile("Simulations", fmtInt(sims), "one cached run of one code"));
     box.appendChild(tile("Benchmarks", fmtInt(recs.length), "type × geometry × library × material"));
+    var nVal = validations(recs);
     box.appendChild(tile("Paired comparisons", fmtInt(pairs.length),
-      nExp ? "OpenMC + YAMC both cached (" + nExp + " expected differences)" : "OpenMC + YAMC both cached"));
+      (nExp ? "OpenMC + YAMC both cached (" + nExp + " expected differences)" : "OpenMC + YAMC both cached") +
+      (nVal ? "; " + nVal + " more against a measurement, not graded" : "")));
     box.appendChild(tile("Floats compared", fmtInt(floats), "spectrum bins, tallies, densities"));
     box.appendChild(tile("Median deviation", median === null ? "n/a" : fmtPct(median),
       median === null ? "no graded comparisons in selection"
@@ -890,6 +914,21 @@
       var c = cmpFor(r, code);
       if (!c) {
         td.appendChild(el("span", "dim", "n/a"));
+        return;
+      }
+      if (c.kind === "validation") {
+        var vb = el("span", "badge");
+        var vdot = el("span", "dot");
+        vdot.style.background = "var(--baseline)";
+        vb.appendChild(vdot);
+        vb.appendChild(el("span", null, "vs measurement"));
+        td.appendChild(vb);
+        ["neutron", "photon"].forEach(function (particle) {
+          td.appendChild(document.createElement("br"));
+          td.appendChild(el("span", "metrics", validationText(c, particle, true)));
+        });
+        td.appendChild(document.createElement("br"));
+        td.appendChild(el("span", "metrics dim", "not graded"));
         return;
       }
       var b = band(c);
@@ -1208,6 +1247,89 @@
     window.Plotly.newPlot(node, traces, layout, { responsive: true, displaylogo: false });
   }
 
+  /* a measured leakage spectrum (points with their errors) against each code's
+     (steps with its Monte Carlo 1 sigma band), and C/E below. Both are already
+     per unit lethargy (neutrons) or per MeV (photons) per source neutron. */
+  function validationFigure(node, title, particle, loaded) {
+    var m = loaded.measurement.results;
+    var bins = m[particle === "neutron" ? "n_energy_bins" : "p_energy_bins"];
+    var meas = m[particle + "_leakage"], err = m[particle + "_leakage_error"];
+    var logE = particle === "neutron";
+    var centers = [];
+    for (var i = 0; i < bins.length - 1; i++) {
+      centers.push(logE ? Math.sqrt(bins[i] * bins[i + 1]) : (bins[i] + bins[i + 1]) / 2);
+    }
+    var dark = isDark();
+    var traces = [];
+    Object.keys(loaded).sort().forEach(function (code) {
+      if (code === "measurement") return;
+      var r = loaded[code].results;
+      var mean = r[particle + "_leakage_mean"], std = r[particle + "_leakage_std"] || [];
+      if (!mean) return;
+      var label = CODE_LABEL[code] || code;
+      var color = (PLOT_STYLES[label] || { color: "gray" }).color;
+      var lo = stepXY(bins, mean.map(function (v, j) { return Math.max(v - (std[j] || 0), 0); }));
+      var hi = stepXY(bins, mean.map(function (v, j) { return v + (std[j] || 0); }));
+      traces.push({ x: lo.x, y: lo.y, mode: "lines", line: { width: 0, color: color },
+                    showlegend: false, hoverinfo: "skip" });
+      traces.push({ x: hi.x, y: hi.y, mode: "lines", line: { width: 0, color: color }, fill: "tonexty",
+                    opacity: 0.3, name: label + " MC 1σ", hoverinfo: "skip" });
+      var xy = stepXY(bins, mean);
+      traces.push({ x: xy.x, y: xy.y, mode: "lines", name: label, line: { color: color, width: 2 } });
+      var ce = stepXY(bins, mean.map(function (v, j) { return meas[j] ? v / meas[j] : null; }));
+      traces.push({ x: ce.x, y: ce.y, mode: "lines", name: label + " C/E", yaxis: "y2", showlegend: false,
+                    line: { color: color, width: 2 } });
+    });
+    traces.push({ x: centers, y: meas, mode: "markers", name: "Measurement",
+                  marker: { color: dark ? "#e8e6dc" : "#1f1e1d", size: 5 },
+                  error_y: { type: "data", array: err, visible: true, thickness: 1,
+                             color: dark ? "#e8e6dc" : "#1f1e1d" } });
+    var ax = axisDefaults();
+    var positive = meas.filter(function (v) { return v > 0; });
+    var layout = plotlyLayout({
+      title: { text: title, font: { size: 13 } },
+      showlegend: true,
+      legend: { x: 0.98, y: 0.98, xanchor: "right", yanchor: "top", bgcolor: "rgba(0,0,0,0)" },
+      xaxis: Object.assign({}, ax, {
+        type: logE ? "log" : "linear", exponentformat: "e",
+        title: { text: "Energy (eV)" },
+        range: logE ? [Math.log10(bins[0]), Math.log10(bins[bins.length - 1])] : [bins[0], bins[bins.length - 1]]
+      }),
+      yaxis: Object.assign({}, ax, {
+        type: "log", exponentformat: "e", domain: [0.36, 1],
+        title: { text: particle === "neutron" ? "Leakage / lethargy / source n" : "Leakage / MeV / source n" },
+        range: positive.length ? [Math.log10(Math.min.apply(null, positive) / 3),
+                                  Math.log10(Math.max.apply(null, positive) * 3)] : undefined
+      }),
+      yaxis2: Object.assign({}, ax, { title: { text: "C/E" }, range: [0, 2], domain: [0, 0.28] }),
+      shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y2", y0: 1, y1: 1,
+                 line: { color: "gray", dash: "dash", width: 1 } }],
+      height: 560
+    });
+    window.Plotly.newPlot(node, traces, layout, { responsive: true, displaylogo: false });
+  }
+
+  /* what the OKTAVIAN comparison leaves in, and what the measurement left out */
+  function oktavianNotes(loaded) {
+    var panel = el("div", "panel");
+    panel.appendChild(el("h3", null, "Known differences from the experiment"));
+    var list = el("ul", "note");
+    [
+      "Gamma gate: the photon measurement counted photons arriving within about 65 ns of the " +
+        "source pulse. yamc runs to steady state, so slow capture gammas are included.",
+      "The Mn vessel's 5.1 cm beam hole is modelled empty: the report does not give the tube thickness.",
+      "The sample masses in the report agree with the modelled geometries to within 3%.",
+      "The tritium target's own gamma rays (0.0862 per source neutron, Table 3.1) are transported " +
+        "in a separate photon-only run and included in the calculated photon leakage.",
+      "The neutron errors are counting statistics only, so χ²/N is large even where C/E is close to 1. " +
+        "This comparison is shown, not graded."
+    ].concat((loaded.measurement.results.left_out || []).map(function (t) {
+      return "From the measured data: " + t + ".";
+    })).forEach(function (t) { list.appendChild(el("li", null, t)); });
+    panel.appendChild(list);
+    return panel;
+  }
+
   /* multi-timestep decay-photon spectra: one trace per step, flux per unit
      lethargy with the notebook's max/10^FLUX_DECADES display threshold */
   function decaySpectrumFigure(node, title, bins, loaded) {
@@ -1481,6 +1603,7 @@
 
   function modelFile(rec) {
     if (rec.family === "transmutation-flux-spectrum") return null;
+    if (rec.family === "oktavian") return null;  /* its own vessel, not the verification sphere */
     if (rec.family === "transmutation-reaction-rate") return "models/sphere-5.html";
     if (rec.geometry === "sphere") return "models/sphere-35.html";
     if (rec.geometry === "broomstick") return "models/broomstick.html";
@@ -1532,13 +1655,14 @@
      same yamc_verify code path the verification uses */
   function reproScript(rec) {
     var mod = familyModule(rec.family);
-    var mcBackends = rec.codes.map(function (c) {
+    var mcBackends = rec.codes.filter(function (c) { return c !== "measurement"; }).map(function (c) {
       return c === "openmc" ? "openmc-cpu" : c;
     }).join(",");
+    var against = rec.family === "oktavian" ? "the measurement" : "OpenMC";
     var envVar = rec.item_kind === "element" ? "YAMC_VERIFY_ELEMENTS" : "YAMC_VERIFY_NUCLIDES";
     return [
       '"""Reproduce the ' + (FAMILY_LABEL[rec.family] || rec.family) + " " + rec.geometry,
-      "benchmark for " + rec.item + " (" + rec.library + "), comparing YAMC against OpenMC.",
+      "benchmark for " + rec.item + " (" + rec.library + "), comparing YAMC against " + against + ".",
       "",
       "Generated by the YAMC verification benchmark database. Run from the root of a",
       "yamc-verification checkout, in its environment (see the repo README for setup).",
@@ -1639,6 +1763,16 @@
         var badges = el("div", "cmp-badges");
         rec.comparisons.forEach(function (c) {
           if (!treatmentMatches(c)) return;  // show only the selected treatment
+          if (c.kind === "validation") {
+            var vb = el("span", "badge");
+            var vdot = el("span", "dot");
+            vdot.style.background = "var(--baseline)";
+            vb.appendChild(vdot);
+            vb.appendChild(el("span", null, (CODE_LABEL[c.code] || c.code) + " vs measurement, not graded: " +
+              validationText(c, "neutron", false) + "; " + validationText(c, "photon", false)));
+            badges.appendChild(vb);
+            return;
+          }
           var b = band(c);
           var badge = el("span", "badge");
           var dot = el("span", "dot");
@@ -1670,7 +1804,22 @@
       var right = el("div", "spectra-col");
       stack.appendChild(right);
       var isDecay = rec.family === "decay-photon";
-      var specs = isDecay ? [] : spectrumSpecs(rec, loaded);
+      var isValidation = rec.family === "oktavian" && loaded.measurement;
+      if (isValidation) {
+        ensurePlotly().then(function () {
+          [["neutron", "Neutron leakage"], ["photon", "Photon leakage"]].forEach(function (spec) {
+            var panel = el("div", "panel");
+            var div = el("div", "plot-div");
+            panel.appendChild(div);
+            right.appendChild(panel);
+            validationFigure(div, spec[1] + ": " + rec.item + " sphere", spec[0], loaded);
+          });
+        }).catch(function (err) {
+          right.appendChild(el("p", "error", err.message + " (spectra cannot be plotted)."));
+        });
+        stack.appendChild(oktavianNotes(loaded));
+      }
+      var specs = (isDecay || isValidation) ? [] : spectrumSpecs(rec, loaded);
       var hasDecay = isDecay && Object.keys(loaded).some(function (c) {
         return (loaded[c].results.spectra || []).length;
       });
@@ -1697,7 +1846,7 @@
         }).catch(function (err) {
           right.appendChild(el("p", "error", err.message + " (spectra cannot be plotted)."));
         });
-      } else if (!rec.family.startsWith("transmutation")) {
+      } else if (!rec.family.startsWith("transmutation") && !isValidation) {
         right.appendChild(el("p", "note", "No spectra in the cached results."));
       }
 
@@ -1736,6 +1885,10 @@
       } else if (rec.family.startsWith("transmutation")) {
         geoPanel.appendChild(el("p", "note",
           "No transport geometry: this task depletes a material against a fixed multigroup flux."));
+      } else if (rec.family === "oktavian") {
+        geoPanel.appendChild(el("p", "note",
+          "The " + rec.item + " sample sphere in its steel vessel, as JAERI-M 94-014 describes it, " +
+          "around a D-T source at the centre: see yamc_verify/families/oktavian.py."));
       } else {
         geoPanel.appendChild(el("p", "note",
           "Interactive geometry viewer for this model is not available yet; the "
