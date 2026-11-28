@@ -344,19 +344,21 @@ def load_measurement(task: Task, item: str, root: Path | str) -> dict:
 # --- the model -----------------------------------------------------------------
 
 
-def build_model(item: str, library: str, experiment: dict):
+def build_model(item: str, library: str, experiment: dict, sample_data: str | None = None):
     """The sample in its vessel, with the neutron and photon leakage tallies.
 
     Returns ``(geometry, neutron_tally, photon_tally)``. The vessel's outer
     sphere is the vacuum boundary and the tallies are the outward current
-    through it, binned as the measurement is.
+    through it, binned as the measurement is. Every nuclear data set comes
+    from ``library``, except the sample's neutron data when ``sample_data`` (a
+    library keyword or an Arrow path) is given.
     """
     import yamc
 
     sphere = SPHERES[item]
     v = VESSELS[sphere["vessel"]]
     sample = yamc.Material({item: 1.0}, sphere["density"], temperature=294, name=item)
-    sample.read_nuclear_data({item: library}, photon_data={sphere["element"]: library})
+    sample.read_nuclear_data({item: sample_data or library}, photon_data={sphere["element"]: library})
     fractions, density = STEELS[sphere["steel"]]
     steel = yamc.Material(fractions, density, fraction_type="mass", temperature=294, name=sphere["steel"])
     natural = yamc.data.element_nuclides()
@@ -407,12 +409,13 @@ def _per_width(result, widths, scale=1.0) -> tuple[list[float], list[float]]:
             [scale * d / w for d, w in zip(result.standard_deviation, widths)])
 
 
-def run_yamc(item: str, task: Task, experiment: dict, compute: str = "cpu") -> dict:
+def run_yamc(item: str, task: Task, experiment: dict, compute: str = "cpu", sample_data: str | None = None) -> dict:
     """yamc's leakage spectra of one sphere, in the measurement's bins and units.
 
     Two runs: the neutron source with secondary photons, and a photon-only run
     of the target's own gammas, scaled to gammas per source neutron and added
     to the photon leakage (and kept on its own as ``target_photon_*``).
+    ``sample_data`` replaces the sample's neutron data (see :func:`build_model`).
     """
     import time
 
@@ -422,7 +425,7 @@ def run_yamc(item: str, task: Task, experiment: dict, compute: str = "cpu") -> d
     source = experiment["source_neutrons"]
     target = experiment["target_photons"]
     t0 = time.perf_counter()
-    geometry, neutron, photon = build_model(item, task.library, experiment)
+    geometry, neutron, photon = build_model(item, task.library, experiment, sample_data)
     run = yamc.Model(
         geometry=geometry, tallies=[neutron, photon], transport_secondary_photons=True, verbose=[],
         source=yamc.NeutronSource(position=(0, 0, 0),
@@ -431,7 +434,7 @@ def run_yamc(item: str, task: Task, experiment: dict, compute: str = "cpu") -> d
     n_mean, n_std = _per_width(run[neutron], n_width)
     p_mean, p_std = _per_width(run[photon], p_width)
 
-    geometry, _, target_tally = build_model(item, task.library, experiment)
+    geometry, _, target_tally = build_model(item, task.library, experiment, sample_data)
     target_run = yamc.Model(
         geometry=geometry, tallies=[target_tally], verbose=[],
         source=yamc.PhotonSource(position=(0, 0, 0),
