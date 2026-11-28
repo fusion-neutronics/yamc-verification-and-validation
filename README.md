@@ -9,8 +9,8 @@ Monte Carlo code, OpenMC.
 pip install -r requirements.txt
 ```
 
-This installs the public `yamc` package, 0.26.0 or newer, from PyPI. It brings
-in the matching `yamc-core` wheel. It also installs the shared `vv` package from
+This installs the public `yamc` package, 0.26.0 or newer, from PyPI (up to
+0.27.0 it brings in the matching `yamc-core` wheel). It also installs the shared `vv` package from
 `packages/vv/` (editable), which provides the `vv` command. Run it from the
 repository root, since the requirements name `packages/vv` by a relative path.
 To verify yamc changes that are not released yet, build the core into the same
@@ -20,8 +20,9 @@ environment instead (see [Using the latest yamc](#using-the-latest-yamc)).
 
 The release check (see [Checking a release](#checking-a-release)) is the main
 check before a release. This older, narrower comparison of core's own
-regression models is kept beside it. Run this locally before releasing yamc or yamc-core (it is not run in CI). Build the core
-checkout you intend to release into this environment, then compare Fe54, Fe56
+regression models is kept beside it. Run this locally before releasing yamc (it
+is not run in CI). Build the core checkout you intend to release
+(fusion-neutronics/yamc-and-yani) into this environment, then compare Fe54, Fe56
 and Fe57 with fresh OpenMC results in four modes: neutron transport, coupled
 transport, D1S decay photons and material transmutation. It does not use
 committed comparison results or a published yamc wheel in place of the selected
@@ -33,14 +34,15 @@ determining the results core's tests require. To run them locally after building
 the desired core into this environment:
 
 ```bash
-python -m yamc_verify.core_validation --core-dir ../core
+python -m yamc_verify.core_validation --core-dir ../yamc-and-yani
 ```
 
 `OPENMC_CROSS_SECTIONS` can select an existing ENDF/B-VIII.1 HDF5 library.
 Otherwise the harness streams the official library archive and caches only the
 selected nuclides, photons and reachable depletion daughters. It uses core's
 Arrow fixtures; run core's `scripts/fetch_test_fixtures.py` first. The generator
-alone is available as `python -m yamc_verify.core_references --core-dir ../core`.
+alone is available as `python -m yamc_verify.core_references --core-dir ../yamc-and-yani`.
+`--core-dir` defaults to `$YAMC_CORE_ROOT`, else `../yamc-and-yani`.
 
 The comparison retains the former core validation conventions: 5% or four-sigma
 scalar bands (10% for heating and photoelectric), spectral chi-square checks,
@@ -520,14 +522,15 @@ compare)".
 
 ## Using the latest yamc
 
-yamc's compiled core is built from the
-[fusion-neutronics/core](https://github.com/fusion-neutronics/core) repository. To
-run the verification against core changes that are not released yet, install the
-core from a sibling checkout into this environment, and run it again after
-pulling or changing Rust code:
+yamc is built from the
+[fusion-neutronics/yamc-and-yani](https://github.com/fusion-neutronics/yamc-and-yani)
+repository (core). To run the verification against core changes that are not
+released yet, build its wasm blobs once, install it from a sibling checkout into
+this environment, and run it again after pulling or changing Rust code:
 
 ```bash
-pip install -e ../core/packages/yamc-core
+../yamc-and-yani/scripts/build_wasm_blobs.sh
+pip install -e ../yamc-and-yani/packages/yamc
 ```
 
 The build replaces the PyPI wheel, and its new extension hash re-keys the YAMC
@@ -546,11 +549,17 @@ python -m yamc_verify.environments list
 - `openmc==<version>` installs that OpenMC wheel from the wheels index named in
   `requirements.txt`. Only versions published there can be installed; asking for
   another lists the ones that are.
-- `yamc==<version>` installs that `yamc-core` release from PyPI.
-- `yamc@<commit>` builds `yamc-core` at that commit from a local core checkout
-  (`--core-dir`, else `$YAMC_CORE_ROOT`, else `../core`), in a temporary worktree
-  with its own Cargo target directory. The commit must include the build commit
-  record (`yamc.__commit__`), which is how the environment is checked.
+- `yamc==<version>` installs that `yamc` release from PyPI.
+- `yamc@<commit>` builds `yamc` at that commit from a local core checkout,
+  fusion-neutronics/yamc-and-yani (`--core-dir`, else `$YAMC_CORE_ROOT`, else
+  `../yamc-and-yani`), in a temporary worktree with its own Cargo target
+  directory, the way core's CI builds the wheel: the wasm blobs with core's
+  `scripts/build_wasm_blobs.sh` (which needs
+  [wasm-pack](https://rustwasm.github.io/wasm-pack/)), then the wheel from
+  `packages/yamc`. A build reports version `0.0.0.dev0`, core's placeholder for
+  an untagged checkout, so its records are told apart by commit. The commit must
+  include the build commit record (`yamc.__commit__`), which is how the
+  environment is checked.
 
 Every environment also has the verification dependencies and the other code at
 its latest release, which the tools use to find nuclear data. It is checked

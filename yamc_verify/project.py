@@ -17,10 +17,11 @@ without its library, such as ``neutron/sphere``) or ``"all"``. A code is one of
 :data:`CODE_NAMES` with an exact version or commit:
 
 * ``openmc==<version>``: an OpenMC wheel from the wheels index in requirements.txt;
-* ``yamc-cpu==<version>`` / ``yamc-gpu==<version>``: a yamc-core release from
-  PyPI, run on that backend;
-* ``yamc-cpu@<commit>`` / ``yamc-gpu@<commit>``: yamc-core built at that commit
-  of a local core checkout (``$YAMC_CORE_ROOT``, else ``../core``).
+* ``yamc-cpu==<version>`` / ``yamc-gpu==<version>``: a yamc release from PyPI,
+  run on that backend;
+* ``yamc-cpu@<commit>`` / ``yamc-gpu@<commit>``: yamc built at that commit of a
+  local core checkout, fusion-neutronics/yamc-and-yani (``$YAMC_CORE_ROOT``,
+  else ``../yamc-and-yani``).
 
 A library is available when its OpenMC data (``cross_sections.xml``) is where
 ``YAMC_VERIFY_NUCLEAR_DATA`` (see :func:`yamc_verify.tasks.nuclear_data_dir`) says. Which items run is chosen
@@ -48,7 +49,7 @@ VV_SRC = REPO_ROOT / "packages" / "vv" / "src"
 
 CODE_NAMES = ("openmc", "yamc-cpu", "yamc-gpu")
 _BACKEND_TOKEN = {"openmc": "openmc-cpu", "yamc-cpu": "yamc-cpu", "yamc-gpu": "yamc-gpu"}
-# Rough times to build an environment: installing wheels, or compiling yamc-core.
+# Rough times to build an environment: installing wheels, or compiling yamc.
 _BUILD_SECONDS = {"release": 300.0, "commit": 1800.0}
 _CODE_RE = re.compile(r"\s*(" + "|".join(CODE_NAMES) + r")\s*(==|@)\s*([A-Za-z0-9._+-]+)\s*")
 
@@ -297,7 +298,7 @@ def _same_version(reported, version: str) -> bool:
 
 
 PROJECT = YamcProject()
-"""The project ``vv.toml`` names, with the core checkout from ``$YAMC_CORE_ROOT`` or ``../core``."""
+"""The project ``vv.toml`` names, with the core checkout from ``$YAMC_CORE_ROOT`` or ``../yamc-and-yani``."""
 
 
 def _models(models, validation: bool) -> list[str] | object:

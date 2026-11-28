@@ -148,7 +148,7 @@ def checks_pass(checks):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--core-dir", type=Path, default=Path(os.environ.get("YAMC_CORE_ROOT", "../core")))
+    parser.add_argument("--core-dir", type=Path, default=Path(os.environ.get("YAMC_CORE_ROOT", "../yamc-and-yani")))
     parser.add_argument("--cross-sections", default=os.environ.get("OPENMC_CROSS_SECTIONS"))
     parser.add_argument("--output-dir", type=Path, default=Path("validation-results"))
     parser.add_argument("--types", nargs="+", choices=TYPES, default=list(TYPES))

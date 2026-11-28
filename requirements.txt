@@ -6,6 +6,6 @@ pandas
 plotly>=5.0.0
 openmc
 openmc_data>=2.4.0
-# The public package selects the matching compiled yamc-core wheel.
-# Keep the minimum aligned with the latest release used for validation.
+# yamc from PyPI (up to 0.27.0 it pulls in the matching compiled yamc-core
+# wheel). Keep the minimum aligned with the latest release used for validation.
 yamc>=0.26.0
