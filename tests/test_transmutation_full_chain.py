@@ -82,7 +82,7 @@ def fake_yamc(monkeypatch):
                  "PulseSchedule"):
         setattr(mod, name, _Anything)
     mod.sources = _Anything()
-    mod.TransmutationChain = _no_reduction
+    mod.TransmutationChain = types.SimpleNamespace(from_arrow=_no_reduction)
     monkeypatch.setitem(sys.modules, "yamc", mod)
     return mod
 

@@ -224,7 +224,7 @@ def transmutation_data_path(library: str) -> str:
 
     yamc caches a release's transmutation subsections as
     ``<yamc.cache_dir()>/<library>/<release>/transmutation/<subsection>.arrow/``,
-    while ``yamc.TransmutationChain`` reads a chain root holding ``decay/``,
+    while ``yamc.TransmutationChain.from_arrow`` reads a chain root holding ``decay/``,
     ``reactions/``, ``fission_yields/`` and optionally ``branching/``. So this
     links the newest cached release holding all three required subsections into
     such a root, under the temporary directory and named by library and release,
@@ -233,7 +233,7 @@ def transmutation_data_path(library: str) -> str:
 
     The subsections are downloaded by any yamc run that transmutes with the
     library's keyword. When no cached release holds them yet, this returns the
-    library's cache folder, which ``TransmutationChain`` refuses with a message
+    library's cache folder, which ``TransmutationChain.from_arrow`` refuses with a message
     naming it; only the callers that read the yamc chain need it.
     """
     releases = [
@@ -271,7 +271,7 @@ def transmutation_network(source: str):
     all assemble the network from the global decay, reactions and fission-yield
     settings. ``source`` is a library keyword, or a chain root holding
     ``decay/``, ``reactions/`` and ``fission_yields/`` (what
-    ``TransmutationChain.export_to_arrow`` writes). All three settings are
+    ``TransmutationChain.to_arrow`` writes). All three settings are
     pointed at it and unset afterwards. yamc has no default for them (since
     yamc-core 0.17.0 a calculation that reads an unset one is refused), so a
     run outside this context cannot read a chain nobody chose.
@@ -309,7 +309,7 @@ def _d1s_chain_maps(chain_file: str, transmutation_data: str):
     else:
         import yamc
 
-        chain = yamc.TransmutationChain(transmutation_data)
+        chain = yamc.TransmutationChain.from_arrow(transmutation_data)
         half_lives = dict(chain.half_lives)
         photon_sources = set(chain.photon_sources)
         reactions_map = {name: [t[1] for t in entries]
@@ -381,7 +381,7 @@ def stable_nuclide_names(library: str, run_openmc: bool, chain_file: str | None 
                 if nuc.half_life is None and "_m" not in nuc.name}
     import yamc
 
-    yamc_chain = yamc.TransmutationChain(transmutation_data)
+    yamc_chain = yamc.TransmutationChain.from_arrow(transmutation_data)
     hl = yamc_chain.half_lives
     return {n for n in yamc_chain.nuclide_names if "_m" not in n and hl.get(n) is None}
 

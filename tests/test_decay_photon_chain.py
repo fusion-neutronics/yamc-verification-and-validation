@@ -69,7 +69,8 @@ def fake_yamc(monkeypatch, tmp_path):
             return types.SimpleNamespace(mean=[[1.0, 2.0]] * steps, std_dev=[[0.1, 0.2]] * steps)
 
     class TransmutationChain:
-        def __init__(self, *args, **kwargs):
+        @classmethod
+        def from_arrow(cls, *args, **kwargs):
             raise AssertionError("the D1S yamc side built a chain of its own instead of "
                                  "reading the library's full chain")
 

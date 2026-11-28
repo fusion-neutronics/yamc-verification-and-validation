@@ -74,3 +74,30 @@ def test_chain_root_links_branching_when_cached(cache):
 
 def test_no_cached_chain_names_the_library_cache(cache):
     assert discovery.transmutation_data_path("endf-b8.1") == str(cache / "endf-b8.1")
+
+
+def test_without_an_openmc_chain_the_yamc_chain_is_read_with_from_arrow(tmp_path, monkeypatch):
+    """yamc 0.26.0 replaced ``TransmutationChain(path)`` with ``TransmutationChain.from_arrow(path)``."""
+    read = []
+
+    class TransmutationChain:
+        def __init__(self, *args, **kwargs):
+            raise TypeError("cannot create 'builtins.TransmutationChain' instances")
+
+        @classmethod
+        def from_arrow(cls, path):
+            read.append(path)
+            return types.SimpleNamespace(
+                half_lives={"Fe56": None, "Mn56": 9284.0, "Fe55": 8.6e7},
+                photon_sources=["Mn56"],
+                reactions={"Fe56": [("(n,p)", "Mn56")], "Fe54": [("(n,g)", "Fe55")]},
+                nuclide_names=["Fe54", "Fe56", "Fe55", "Mn56", "Fe56_m1"],
+            )
+
+    monkeypatch.setitem(sys.modules, "yamc", types.SimpleNamespace(TransmutationChain=TransmutationChain))
+    missing = str(tmp_path / "no-chain.xml")
+    half_lives, sources, reactions = discovery._d1s_chain_maps(missing, "chain-root")
+    assert sources == {"Mn56"} and reactions == {"Fe56": ["Mn56"], "Fe54": ["Fe55"]}
+    assert discovery.stable_nuclide_names("endf-b8.1", run_openmc=False, chain_file=missing,
+                                          transmutation_data="chain-root") == {"Fe54", "Fe56"}
+    assert read[0] == "chain-root" and len(read) == 2
