@@ -21,3 +21,7 @@ vv = "vv.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# The shared site assets (vv.site), which a project's site build copies in.
+"vv.site" = ["*.css", "*.js"]
